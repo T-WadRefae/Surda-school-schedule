@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>الجدول المدرسي الأسبوعي</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-logo">🗓️</div>
+      <div class="header-text">
+        <h1>الجدول المدرسي الأسبوعي</h1>
+        <p>عرض حسب الصف أو المعلمة أو اليوم</p>
+      </div>
+      <div class="header-today" id="today-label">—</div>
+    </div>
+  </header>
+
+  <main class="container">
+
+    <a class="cover-cta no-print" href="cover.html">
+      <span class="ico">🔄</span>
+      <span>
+        <b>إشغال الغياب</b>
+        <span>معلمة غائبة اليوم؟ وزّعي حصصها تلقائيًا على المتفرغات دون تضارب</span>
+      </span>
+    </a>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="class">📘 حسب الصف</button>
+      <button class="tab" data-tab="teacher">👩‍🏫 حسب المعلمة</button>
+      <button class="tab" data-tab="day">📆 حسب اليوم</button>
+      <button class="tab" data-tab="free">🔁 الإشغال</button>
+    </nav>
+
+    <div class="toolbar">
+      <input type="search" id="search" class="search-box" placeholder="ابحثي…" />
+      <button class="btn btn-ghost" id="print-btn">🖨️ طباعة</button>
+    </div>
+
+    <div id="picker" class="toolbar"></div>
+
+    <div id="content"></div>
+
+  </main>
+
+  <footer class="site-footer">
+    نظام الجدول المدرسي
+    <div class="credit">
+      <span dir="ltr">Designed with 🫶🏻 by T. Wad Refae</span>
+      <span class="credit-sep">·</span>
+      <span>صُمّم بحب 🫶🏻 أ. وعد رفاعي</span>
+    </div>
+  </footer>
+
+  <script src="data.js"></script>
+  <script src="core.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
