@@ -108,9 +108,16 @@ function renderTeacherView(teacher) {
     </div>`;
   }).join('');
 
+  const info = (typeof TEACHER_INFO !== 'undefined' && TEACHER_INFO[teacher]) || {};
+  const badges = [
+    info.home ? `<span class="count">تربية الصف ${esc(info.home)}</span>` : '',
+    info.duty ? `<span class="count">تفريغ: ${esc(info.duty)}</span>` : ''
+  ].join('');
+
   return `
     <div class="card">
-      <div class="card-title">👩‍🏫 جدول المعلمة ${esc(teacher)} <span class="count">${mine.length} حصة أسبوعيًا</span></div>
+      <div class="card-title">👩‍🏫 جدول المعلمة ${esc(teacher)}
+        <span class="count">${mine.length} حصة أسبوعيًا</span>${badges}</div>
       <div class="table-wrap">
         <table class="grid"><thead>${head}</thead><tbody>${body}</tbody></table>
       </div>
