@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>الجدول الأسبوعي — نسخة الطباعة</title>
+  <link rel="icon" type="image/png" href="assets/logo.png" />
+  <style>
+  @page { size: A3 landscape; margin: 7mm 8mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Noto Naskh Arabic", "Noto Sans Arabic", "DejaVu Sans", serif;
+         color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .head { display: flex; align-items: baseline; gap: 10mm; margin-bottom: 2.5mm; }
+  .head h1 { margin: 0; font-size: 13pt; font-weight: 700; }
+  .head .meta { font-size: 8pt; }
+  .head .by { margin-inline-start: auto; font-size: 8pt; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  th, td { border: .4pt solid #000; text-align: center; vertical-align: middle;
+           padding: .5mm .3mm; font-size: 6.6pt; line-height: 1.15; overflow: hidden; }
+  thead th { background: #e8e8e8; font-weight: 700; font-size: 7pt; }
+  thead th.h2 { font-size: 5.8pt; font-weight: 600; background: #f2f2f2; }
+  .c-day { width: 16mm; } .c-per { width: 15mm; }
+  .c-cls { width: 29mm; }
+  .c-sub { width: 58mm; } .c-free { width: 22mm; } .c-duty { width: 22mm; }
+  th.day { background: #e8e8e8; font-weight: 700; font-size: 9.5pt; }
+  th.per { background: #f6f6f6; font-weight: 600; font-size: 6.4pt; }
+  td.s { font-weight: 700; }
+  td.t { color: #000; }
+  td.x { background: #f0f0f0; }
+  td.free { font-size: 5.8pt; text-align: center; letter-spacing: -.1pt; }
+  tbody tr { height: 6.4mm; }
+  tr.day-end td, tr.day-end th { border-bottom: 1.1pt solid #000; }
+  .legend { margin-top: 2.5mm; font-size: 7pt; display: flex; flex-direction: column; gap: 1mm; }
+  .legend b { font-weight: 700; }
+
+  /* على الشاشة فقط */
+  body { background: #f4f6f8; padding: 14px; }
+  .bar {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    max-width: 1400px; margin: 0 auto 14px; font-size: 14px;
+  }
+  .bar a, .bar button {
+    font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer;
+    padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd5e1;
+    background: #fff; color: #26414f; text-decoration: none;
+  }
+  .bar button { background: #26414f; color: #fff; border-color: #26414f; }
+  .bar .hint { color: #64748b; font-weight: 600; }
+  .sheet {
+    background: #fff; max-width: 1400px; margin: 0 auto;
+    padding: 16px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.08);
+    overflow-x: auto;
+  }
+  @media print {
+    body { background: #fff; padding: 0; }
+    .bar { display: none !important; }
+    .sheet { box-shadow: none; border-radius: 0; padding: 0; max-width: none; overflow: visible; }
+  }
+  </style>
+</head>
+<body>
+
+  <div class="bar">
+    <button onclick="window.print()">🖨️ طباعة / حفظ PDF</button>
+    <a href="index.html">↩ الجدول التفاعلي</a>
+    <span class="hint">في نافذة الطباعة اختاري: الحجم A3 — الاتجاه أفقي — وفعّلي «الرسوم والخلفيات».</span>
+  </div>
+
+  <div class="sheet">
+    <div class="head">
+      <h1>الجدول المدرسي الأسبوعي</h1>
+      <span class="meta" id="meta"></span>
+      <span class="by" dir="ltr">T. Wad Refae</span>
+    </div>
+    <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+    <div class="legend">
+      <div><b>حصص التفريغ:</b> <span id="duties"></span></div>
+      <div><b>تربية الصف:</b> <span id="homes"></span></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="core.js"></script>
+  <script src="week.js"></script>
+</body>
+</html>
