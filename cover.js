@@ -7,11 +7,15 @@ const STATE = {
   d: Math.max(0, todayIndex()),
   absent: new Set(),
   compact: true,     // تقديم الحصص المتأخرة لسدّ الشاغر قبل اللجوء إلى الإشغال
+  dropOk: true,      // الاستغناء عن حصص DISPENSABLE حتى لا يبقى صف وحده في آخر اليوم
   maxCover: 2,       // الحد الأعلى المفضَّل لحصص الإشغال للمعلمة الواحدة
   overrides: {}      // "حصة-صف" => 'auto' | '' (بلا تغطية) | اسم معلمة الإشغال
 };
 
 const slotKey = (p, c) => `${p}-${c}`;
+
+/* المواد التي يمكن الاستغناء عنها عند الضرورة */
+const DISPENSABLE = ['فن', 'مهني', 'رياضة'];
 
 /* ==========================================================
    الخوارزمية
@@ -25,6 +29,10 @@ const slotKey = (p, c) => `${p}-${c}`;
         من الحصص المنقولة، مع تفضيل نقل الحصص الأخيرة.
       • إن كان الشاغر نفسه آخر حصة في يوم الصف، ينصرف الصف
         أبكر دون نقل أي حصة.
+   ١-ب) لا يبقى صف وحده في آخر اليوم: إن انصرفت الصفوف كلها
+      وبقي صف واحد، يُستغنى فيه عن حصة فن أو مهني أو رياضة،
+      فتُقدَّم إلى مكانها حصته الأخيرة (إن كانت معلمتها متفرغة)
+      وينصرف مع البقية.
    ٢) الإشغال الإضافي: ما تعذّر سدّه بالتقديم تُغطّيه معلمة
       متفرغة، بالأولويات:
       • تُدرّس المادة نفسها لهذا الصف ← الأفضل
@@ -115,7 +123,8 @@ function buildPlan() {
       return o !== undefined && o !== 'auto';
     });
     const r = STATE.compact ? compactClass(present, len, vac, forced, busy) : null;
-    const plan = { len, newLen: len, kept: vac.slice(), moves: [], pos: new Map(present.map(l => [l, l.p])) };
+    const plan = { len, newLen: len, kept: vac.slice(), moves: [], dropped: [],
+      pos: new Map(present.map(l => [l, l.p])) };
     if (r) {
       Object.assign(plan, { newLen: r.newLen, kept: r.kept, pos: r.pos });
       r.pos.forEach((to, l) => {
@@ -128,6 +137,64 @@ function buildPlan() {
     }
     classes[c] = plan;
   });
+
+  // ١-ب) لا يبقى صف وحده في آخر اليوم
+  const lenOf = c => dayLessons.filter(l => l.c === c).reduce((m, l) => Math.max(m, l.p + 1), 0);
+  const endOf = c => (classes[c] ? classes[c].newLen : lenOf(c));
+  const forcedOf = (c, vac) => vac.filter(p => {
+    const o = STATE.overrides[slotKey(p, c)];
+    return o !== undefined && o !== 'auto';
+  });
+
+  const shortenAlone = (c, last) => {
+    const own = dayLessons.filter(l => l.c === c);
+    const len = lenOf(c);
+    const cur = classes[c] || { len, newLen: len, kept: [], moves: [], dropped: [],
+      pos: new Map(own.map(l => [l, l.p])) };
+    const dropped0 = cur.dropped || [];
+    const shift = (moves, back) => moves.forEach(m => {
+      busy[m.lesson.teacher].delete(back ? m.to : m.from);
+      busy[m.lesson.teacher].add(back ? m.from : m.to);
+    });
+    shift(cur.moves, true);                               // تراجع مؤقت عن نقلات هذا الصف
+
+    const vac0 = own.filter(l => absent.has(l.teacher)).map(l => l.p);
+    const base = own.filter(l => !absent.has(l.teacher) && !dropped0.includes(l));
+    let best = null;
+    base.filter(l => DISPENSABLE.includes(l.subject)).forEach(D => {
+      const present = base.filter(l => l !== D);
+      const drops = [...dropped0, D].map(l => l.p);
+      busy[D.teacher].delete(D.p);
+      const r = compactClass(present, len, [...vac0, ...drops], forcedOf(c, vac0), busy);
+      busy[D.teacher].add(D.p);
+      if (!r || r.newLen >= last) return;
+      if (drops.some(p => r.kept.includes(p))) return;               // الحصة المستغنى عنها لا تُشغَل
+      if (r.kept.length > cur.kept.length) return;                   // لا نبدّل تقديمًا بإشغال
+      if (!best || r.moves < best.r.moves || (r.moves === best.r.moves && D.p > best.D.p)) best = { D, r };
+    });
+
+    if (!best) { shift(cur.moves, false); return false; }
+    const { D, r } = best;
+    const moves = [];
+    r.pos.forEach((to, l) => { if (to !== l.p) moves.push({ lesson: l, from: l.p, to }); });
+    moves.sort((a, b) => a.to - b.to);
+    shift(moves, false);
+    busy[D.teacher].delete(D.p);
+    classes[c] = { len, newLen: r.newLen, kept: r.kept, pos: r.pos, moves, dropped: [...dropped0, D] };
+    return true;
+  };
+
+  let lone = null;
+  if (STATE.compact && STATE.dropOk && affected.length) {
+    for (let guard = 0; guard < CLASSES.length; guard++) {
+      const ends = CLASSES.map((_, c) => endOf(c));
+      const last = Math.max(...ends);
+      const at = ends.map((e, c) => (e === last ? c : -1)).filter(c => c >= 0);
+      const before = CLASSES.filter((_, c) => lenOf(c) >= last).length;
+      if (at.length !== 1 || before < 2) break;          // وحده بسبب الغياب فقط
+      if (!shortenAlone(at[0], last)) { lone = { c: at[0], p: last - 1 }; break; }
+    }
+  }
 
   // ٢) الإشغال الإضافي لما بقي من شواغر
   const usedInPeriod = {};
@@ -189,7 +256,7 @@ function buildPlan() {
     assignments[key] = { lesson, type: 'cover', teacher: best.t, sameSubject: best.sameSubject };
   });
 
-  return { affected, assignments, coverCount, usedInPeriod, classes, busy };
+  return { affected, assignments, coverCount, usedInPeriod, classes, busy, lone };
 }
 
 /** المعلمات المتاحات لإشغال خانة معيّنة (لقائمة التعديل اليدوي) */
@@ -244,12 +311,15 @@ function renderPlan(plan) {
   const early = Object.entries(plan.classes).filter(([, k]) => k.newLen < k.len);
   const helpers = [...new Set(covers.map(a => a.teacher))];
   const moveCount = Object.values(plan.classes).reduce((n, k) => n + k.moves.length, 0);
+  const dropped = Object.values(plan.classes).flatMap(k => k.dropped);
 
   /* --- ما يتغيّر في كل صف --- */
   const classCards = Object.entries(plan.classes).map(([c, k]) => {
     const lines = [];
     k.moves.forEach(m => lines.push(`<li>⏫ أ. ${esc(m.lesson.teacher)} تُعطي <b>${esc(m.lesson.subject)}</b>
       في الحصة <b>${esc(PERIOD_NAMES[m.to])}</b> بدل ${esc(PERIOD_NAMES[m.from])}</li>`));
+    k.dropped.forEach(l => lines.push(`<li>✂️ يُستغنى عن حصة <b>${esc(l.subject)}</b> (أ. ${esc(l.teacher)})
+      في الحصة ${esc(PERIOD_NAMES[l.p])} حتى لا يبقى الصف وحده</li>`));
     k.kept.forEach(p => {
       const a = plan.assignments[slotKey(p, +c)];
       lines.push(a.teacher
@@ -352,10 +422,15 @@ function renderPlan(plan) {
         <div class="stat"><div class="num">${covers.length}</div><div class="lbl">إشغال إضافي</div></div>
         <div class="stat"><div class="num">${gaps.length}</div><div class="lbl">بلا تغطية</div></div>
         <div class="stat"><div class="num">${early.length}</div><div class="lbl">صف ينصرف أبكر</div></div>
+        ${dropped.length ? `<div class="stat"><div class="num">${dropped.length}</div><div class="lbl">حصة مستغنى عنها</div></div>` : ''}
       </div>
+      ${plan.lone ? `<p class="hint danger-text">⚠️ الصف ${esc(CLASSES[plan.lone.c])} يبقى وحده في الحصة
+        ${esc(PERIOD_NAMES[plan.lone.p])}، ولا توجد فيه حصة ${DISPENSABLE.join(' أو ')} يمكن الاستغناء عنها دون تضارب.</p>` : ''}
       ${gaps.length ? `<p class="hint danger-text">⚠️ ${gaps.length} حصة لم تُغطَّ لعدم توفر معلمة متفرغة:
         ${gaps.map(g => `${esc(PERIOD_NAMES[g.lesson.p])} / ${esc(g.lesson.className)}`).join(' — ')}</p>` : ''}
-      <p class="hint">نُقلت ${moveCount} حصة إلى وقت أبكر، ولم تُلغَ أي حصة لمعلمة حاضرة إلا بعد أن أعطتها أبكر.</p>
+      <p class="hint">نُقلت ${moveCount} حصة إلى وقت أبكر${dropped.length
+        ? `، واستُغني عن ${dropped.length} حصة (${[...new Set(dropped.map(l => l.subject))].map(esc).join('، ')}) حتى لا يبقى صف وحده`
+        : '، ولم تُلغَ أي حصة لمعلمة حاضرة إلا بعد أن أعطتها أبكر'}.</p>
       <div class="card-title" style="margin-top:16px">ما يتغيّر في كل صف</div>
       <div class="class-changes">${classCards}</div>
       <div class="card-title" style="margin-top:16px">الإشغال الإضافي على كل معلمة</div>
@@ -398,7 +473,8 @@ function planText(plan) {
       const a = plan.assignments[slotKey(p, +c)];
       lines.push(`• الحصة ${PERIOD_NAMES[p]} (${a.lesson.subject}): ${a.teacher ? 'إشغال أ. ' + a.teacher : 'بلا تغطية'}`);
     });
-    if (!k.moves.length && !k.kept.length) lines.push('• لا نقل، الشاغر في آخر اليوم');
+    k.dropped.forEach(l => lines.push(`• يُستغنى عن حصة ${l.subject} (أ. ${l.teacher}) في الحصة ${PERIOD_NAMES[l.p]} حتى لا يبقى الصف وحده`));
+    if (!k.moves.length && !k.kept.length && !k.dropped.length) lines.push('• لا نقل، الشاغر في آخر اليوم');
   });
   return lines.join('\n');
 }
@@ -412,6 +488,7 @@ function render() {
   $('#day-picker').innerHTML = renderDayPicker();
   $('#absent-picker').innerHTML = renderAbsentPicker();
   $('#opt-compact').checked = STATE.compact;
+  $('#opt-drop').checked = STATE.dropOk;
   $('#opt-max').value = STATE.maxCover;
 
   CURRENT_PLAN = buildPlan();
@@ -445,6 +522,12 @@ function render() {
 function init() {
   const tIdx = todayIndex();
   $('#today-label').textContent = tIdx >= 0 ? `اليوم: ${DAYS[tIdx]}` : 'عطلة نهاية الأسبوع';
+
+  $('#opt-drop').addEventListener('change', e => {
+    STATE.dropOk = e.target.checked;
+    STATE.overrides = {};
+    render();
+  });
 
   $('#opt-compact').addEventListener('change', e => {
     STATE.compact = e.target.checked;
