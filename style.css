@@ -309,3 +309,15 @@ table.list-table select:focus { outline: 2px solid var(--brand); outline-offset:
   table.list-table td:nth-child(6) { display: none; }
   .list-hint { display: none !important; }
 }
+
+/* ===== تقديم الحصص في صفحة الإشغال ===== */
+table.grid tbody tr td.moved { background: #e8f1fd !important; }
+table.grid td.moved .cell-teacher b { color: #1d4f91; }
+table.grid tbody tr td.out {
+  background: repeating-linear-gradient(135deg, #f1f1f1 0 6px, #fafafa 6px 12px) !important;
+}
+table.grid td.out .cell-teacher { color: #8a8a8a; font-weight: 800; }
+.class-changes { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.class-change { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--surface); }
+.cc-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.class-change ul { margin: 0; padding-inline-start: 18px; font-size: .86rem; line-height: 1.8; }

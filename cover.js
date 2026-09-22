@@ -6,9 +6,9 @@
 const STATE = {
   d: Math.max(0, todayIndex()),
   absent: new Set(),
-  lastFirst: true,   // أولوية التوزيع للحصص الأخيرة
+  compact: true,     // تقديم الحصص المتأخرة لسدّ الشاغر قبل اللجوء إلى الإشغال
   maxCover: 2,       // الحد الأعلى المفضَّل لحصص الإشغال للمعلمة الواحدة
-  overrides: {}      // "حصة-صف" => اسم المعلمة، أو "" لترك الحصة بلا تغطية
+  overrides: {}      // "حصة-صف" => 'auto' | '' (بلا تغطية) | اسم معلمة الإشغال
 };
 
 const slotKey = (p, c) => `${p}-${c}`;
@@ -16,66 +16,162 @@ const slotKey = (p, c) => `${p}-${c}`;
 /* ==========================================================
    الخوارزمية
    ----------------------------------------------------------
-   القيود (تضمن عدم التضارب):
-     • البديلة متفرغة أصلًا في تلك الحصة.
-     • البديلة ليست غائبة.
-     • البديلة لم تُسنَد إليها حصة إشغال أخرى في الحصة نفسها.
-   الأولويات (ترتيب المفاضلة بين المتفرغات):
-     • تُدرّس المادة نفسها لهذا الصف  ← الأفضل
-     • تُدرّس المادة نفسها
-     • تُدرّس الصف نفسه
-     • الأقل عددًا في حصص الإشغال اليوم (توزيع عادل)
-     • الأقل نصابًا أسبوعيًا
-   ترتيب المعالجة: من آخر حصة إلى أولها افتراضيًا، فتنال الحصص
-   الأخيرة أفضل المتفرغات المتاحات.
+   ١) تقديم الحصص المتأخرة (لكل صف على حدة):
+      حصة الغائبة تصير شاغرًا، فتُقدَّم إليه حصة معلمة حاضرة
+      من آخر اليوم في الصف نفسه، فتُعطي المعلمة حصتها أبكر
+      وتُلغى حصتها المتأخرة، وينصرف الصف أبكر بحصة.
+      • المعلمة المُقدَّمة يجب أن تكون متفرغة في الحصة الجديدة.
+      • يُختار الترتيب الذي يسدّ أكبر عدد من الشواغر بأقل عدد
+        من الحصص المنقولة، مع تفضيل نقل الحصص الأخيرة.
+      • إن كان الشاغر نفسه آخر حصة في يوم الصف، ينصرف الصف
+        أبكر دون نقل أي حصة.
+   ٢) الإشغال الإضافي: ما تعذّر سدّه بالتقديم تُغطّيه معلمة
+      متفرغة، بالأولويات:
+      • تُدرّس المادة نفسها لهذا الصف ← الأفضل
+      • تُدرّس المادة نفسها
+      • تُدرّس الصف نفسه
+      • الأقل عددًا في حصص الإشغال اليوم (توزيع عادل)
+      • الأقل نصابًا أسبوعيًا
    ========================================================== */
+
+/** كل المجموعات الجزئية ذات الحجم k من المصفوفة arr */
+function combos(arr, k) {
+  if (!k) return [[]];
+  const out = [];
+  arr.forEach((x, i) => combos(arr.slice(i + 1), k - 1).forEach(r => out.push([x, ...r])));
+  return out;
+}
+
+/** يوزّع حصص الصف الحاضرة على المواضع المتاحة بأقل عدد من النقلات */
+function placeLessons(present, slots, busy) {
+  let best = null;
+  const cur = new Map();
+  const used = new Set();
+  const len = Math.max(...present.map(l => l.p), ...slots) + 1;
+  const walk = (i, moves, late) => {
+    if (best && (moves > best.moves || (moves === best.moves && late >= best.late))) return;
+    if (i === present.length) { best = { moves, late, pos: new Map(cur) }; return; }
+    const l = present[i];
+    const order = slots.includes(l.p) ? [l.p, ...slots.filter(x => x !== l.p)] : slots;
+    order.forEach(x => {
+      if (used.has(x)) return;
+      const moved = x !== l.p;
+      if (moved && busy[l.teacher].has(x)) return;          // المعلمة مشغولة في تلك الحصة
+      used.add(x); cur.set(l, x);
+      walk(i + 1, moves + (moved ? 1 : 0), late + (moved ? len - l.p : 0));
+      used.delete(x); cur.delete(l);
+    });
+  };
+  walk(0, 0, 0);
+  return best;
+}
+
+/** يقدّم حصص الصف المتأخرة إلى الشواغر؛ يعيد أفضل ترتيب أو null */
+function compactClass(present, len, vac, forced, busy) {
+  const free = vac.filter(p => !forced.includes(p));
+  for (let j = free.length; j >= 1; j--) {
+    let best = null;
+    combos(free, j).forEach(S => {
+      const kept = vac.filter(p => !S.includes(p));
+      const newLen = len - j;
+      if (kept.some(p => p >= newLen)) return;
+      const slots = [];
+      for (let x = 0; x < newLen; x++) if (!kept.includes(x)) slots.push(x);
+      const r = placeLessons(present, slots, busy);
+      if (r && (!best || r.moves < best.moves || (r.moves === best.moves && r.late < best.late))) {
+        best = { ...r, kept, newLen };
+      }
+    });
+    if (best) return best;
+  }
+  return null;
+}
+
 function buildPlan() {
   const d = STATE.d;
   const absent = STATE.absent;
+  const dayLessons = LESSONS.filter(l => l.d === d);
 
-  const affected = LESSONS
-    .filter(l => l.d === d && absent.has(l.teacher))
-    .sort((a, b) => (STATE.lastFirst ? b.p - a.p : a.p - b.p) || a.c - b.c);
+  const affected = dayLessons.filter(l => absent.has(l.teacher))
+    .sort((a, b) => b.p - a.p || a.c - b.c);
 
-  const usedInPeriod = {};            // "حصة" => Set(أسماء المعلمات المُشغَّلات)
-  const coverCount = {};              // اسم المعلمة => عدد حصص الإشغال اليوم
-  TEACHERS.forEach(t => { coverCount[t] = 0; });
+  // حصص كل معلمة حاضرة في هذا اليوم، وتُحدَّث مع كل نقل
+  const busy = {};
+  TEACHERS.forEach(t => { busy[t] = new Set(); });
+  dayLessons.forEach(l => { if (!absent.has(l.teacher)) busy[l.teacher].add(l.p); });
 
-  const reserve = (p, teacher) => {
-    (usedInPeriod[p] = usedInPeriod[p] || new Set()).add(teacher);
-    coverCount[teacher]++;
-  };
+  const classes = {};            // رقم الصف => ترتيب يومه بعد التعديل
+  const byClass = {};
+  affected.forEach(l => (byClass[l.c] = byClass[l.c] || []).push(l));
 
-  const isAvailable = (teacher, lesson) =>
-    !absent.has(teacher) &&
-    !lessonsOf(teacher, d, lesson.p).length &&
-    !(usedInPeriod[lesson.p] && usedInPeriod[lesson.p].has(teacher));
-
-  const assignments = {};
-  const manual = [];
-
-  // 1) التعديلات اليدوية أولًا حتى تُحجز أماكنها قبل التوزيع التلقائي
-  affected.forEach(lesson => {
-    const key = slotKey(lesson.p, lesson.c);
-    if (!(key in STATE.overrides)) return;
-    const pick = STATE.overrides[key];
-    if (pick && isAvailable(pick, lesson)) {
-      reserve(lesson.p, pick);
-      assignments[key] = { lesson, teacher: pick, manual: true };
-    } else {
-      assignments[key] = { lesson, teacher: null, manual: true };
+  // ١) تقديم الحصص المتأخرة
+  Object.keys(byClass).map(Number).sort((a, b) => a - b).forEach(c => {
+    const own = dayLessons.filter(l => l.c === c);
+    const len = own.reduce((m, l) => Math.max(m, l.p + 1), 0);
+    const vac = byClass[c].map(l => l.p);
+    const present = own.filter(l => !absent.has(l.teacher)).sort((a, b) => a.p - b.p);
+    const forced = vac.filter(p => {
+      const o = STATE.overrides[slotKey(p, c)];
+      return o !== undefined && o !== 'auto';
+    });
+    const r = STATE.compact ? compactClass(present, len, vac, forced, busy) : null;
+    const plan = { len, newLen: len, kept: vac.slice(), moves: [], pos: new Map(present.map(l => [l, l.p])) };
+    if (r) {
+      Object.assign(plan, { newLen: r.newLen, kept: r.kept, pos: r.pos });
+      r.pos.forEach((to, l) => {
+        if (to === l.p) return;
+        plan.moves.push({ lesson: l, from: l.p, to });
+        busy[l.teacher].delete(l.p);
+        busy[l.teacher].add(to);
+      });
+      plan.moves.sort((a, b) => a.to - b.to);
     }
-    manual.push(key);
+    classes[c] = plan;
   });
 
-  // 2) التوزيع التلقائي لبقية الحصص
+  // ٢) الإشغال الإضافي لما بقي من شواغر
+  const usedInPeriod = {};
+  const coverCount = {};
+  TEACHERS.forEach(t => { coverCount[t] = 0; });
+  const reserve = (p, t) => {
+    (usedInPeriod[p] = usedInPeriod[p] || new Set()).add(t);
+    coverCount[t]++;
+  };
+  const isAvailable = (t, p) =>
+    !absent.has(t) && !busy[t].has(p) && !(usedInPeriod[p] && usedInPeriod[p].has(t));
+
+  const assignments = {};
+  const toCover = affected.filter(l => classes[l.c].kept.includes(l.p));
+
   affected.forEach(lesson => {
+    if (toCover.includes(lesson)) return;
+    const plan = classes[lesson.c];
+    const filler = [...plan.pos].find(([, to]) => to === lesson.p);
+    assignments[slotKey(lesson.p, lesson.c)] = {
+      lesson, type: 'compact',
+      filler: filler ? { lesson: filler[0], from: filler[0].p } : null
+    };
+  });
+
+  // الاختيارات اليدوية أولًا
+  toCover.forEach(lesson => {
+    const key = slotKey(lesson.p, lesson.c);
+    const pick = STATE.overrides[key];
+    if (pick === undefined || pick === 'auto') return;
+    if (pick && isAvailable(pick, lesson.p)) {
+      reserve(lesson.p, pick);
+      assignments[key] = { lesson, type: 'cover', teacher: pick, manual: true,
+        sameSubject: teachesSubject(pick, lesson.subject) };
+    } else {
+      assignments[key] = { lesson, type: 'gap', teacher: null, manual: true };
+    }
+  });
+
+  toCover.forEach(lesson => {
     const key = slotKey(lesson.p, lesson.c);
     if (assignments[key]) return;
-
-    const candidates = TEACHERS.filter(t => isAvailable(t, lesson));
-    if (!candidates.length) { assignments[key] = { lesson, teacher: null }; return; }
-
+    const candidates = TEACHERS.filter(t => isAvailable(t, lesson.p));
+    if (!candidates.length) { assignments[key] = { lesson, type: 'gap', teacher: null }; return; }
     const scored = candidates.map(t => {
       let score = 0;
       const sameSubject = teachesSubject(t, lesson.subject);
@@ -88,27 +184,19 @@ function buildPlan() {
       score -= WEEKLY_LOAD[t] * 0.4;
       return { t, score, sameSubject, sameClass };
     }).sort((a, b) => b.score - a.score || a.t.localeCompare(b.t, 'ar'));
-
     const best = scored[0];
     reserve(lesson.p, best.t);
-    assignments[key] = {
-      lesson, teacher: best.t,
-      sameSubject: best.sameSubject,
-      sameClass: best.sameClass,
-      over: coverCount[best.t] > STATE.maxCover,
-      alternatives: scored.slice(1, 6).map(x => x.t)
-    };
+    assignments[key] = { lesson, type: 'cover', teacher: best.t, sameSubject: best.sameSubject };
   });
 
-  return { affected, assignments, coverCount, usedInPeriod, manual };
+  return { affected, assignments, coverCount, usedInPeriod, classes, busy };
 }
 
-/** المعلمات المتاحات لخانة معيّنة (لقائمة التعديل اليدوي) */
+/** المعلمات المتاحات لإشغال خانة معيّنة (لقائمة التعديل اليدوي) */
 function availableFor(lesson, plan) {
-  const d = STATE.d;
   return TEACHERS.filter(t => {
     if (STATE.absent.has(t)) return false;
-    if (lessonsOf(t, d, lesson.p).length) return false;
+    if (plan.busy[t].has(lesson.p)) return false;
     const taken = plan.usedInPeriod[lesson.p];
     const mine = plan.assignments[slotKey(lesson.p, lesson.c)];
     if (mine && mine.teacher === t) return true;      // اختيارها الحالي
@@ -149,55 +237,100 @@ function renderPlan(plan) {
     </div>`;
   }
 
-  const covered = Object.values(plan.assignments).filter(a => a.teacher).length;
-  const gaps = Object.values(plan.assignments).filter(a => !a.teacher);
-  const helpers = [...new Set(Object.values(plan.assignments).filter(a => a.teacher).map(a => a.teacher))];
+  const all = Object.values(plan.assignments);
+  const compacted = all.filter(a => a.type === 'compact');
+  const covers = all.filter(a => a.type === 'cover');
+  const gaps = all.filter(a => a.type === 'gap');
+  const early = Object.entries(plan.classes).filter(([, k]) => k.newLen < k.len);
+  const helpers = [...new Set(covers.map(a => a.teacher))];
+  const moveCount = Object.values(plan.classes).reduce((n, k) => n + k.moves.length, 0);
+
+  /* --- ما يتغيّر في كل صف --- */
+  const classCards = Object.entries(plan.classes).map(([c, k]) => {
+    const lines = [];
+    k.moves.forEach(m => lines.push(`<li>⏫ أ. ${esc(m.lesson.teacher)} تُعطي <b>${esc(m.lesson.subject)}</b>
+      في الحصة <b>${esc(PERIOD_NAMES[m.to])}</b> بدل ${esc(PERIOD_NAMES[m.from])}</li>`));
+    k.kept.forEach(p => {
+      const a = plan.assignments[slotKey(p, +c)];
+      lines.push(a.teacher
+        ? `<li>🔁 الحصة ${esc(PERIOD_NAMES[p])} (${esc(a.lesson.subject)}): إشغال أ. ${esc(a.teacher)}</li>`
+        : `<li class="danger-text">⚠️ الحصة ${esc(PERIOD_NAMES[p])} (${esc(a.lesson.subject)}): بلا تغطية</li>`);
+    });
+    const end = k.newLen < k.len
+      ? `<span class="pill ok">ينصرف بعد الحصة ${esc(PERIOD_NAMES[k.newLen - 1])}</span>`
+      : '<span class="pill warn">دوام كامل</span>';
+    return `<div class="class-change">
+      <div class="cc-head"><b>الصف ${esc(CLASSES[c])}</b> ${end}</div>
+      <ul>${lines.join('') || '<li>لا نقل — الشاغر في آخر اليوم</li>'}</ul>
+    </div>`;
+  }).join('');
 
   /* --- جدول اليوم بعد التعديل --- */
-  let head = '<tr><th>الحصة</th>' + CLASSES.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  const head = '<tr><th>الحصة</th>' + CLASSES.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  const cellAt = (p, c) => {
+    const k = plan.classes[c];
+    if (!k) {
+      const parsed = parseCell(TIMETABLE[DAYS[d]][p][c]);
+      return parsed ? cellHTML(parsed) : '<td class="empty"></td>';
+    }
+    if (p >= k.newLen) {
+      return p < k.len ? '<td class="out"><span class="cell-teacher">انصراف</span></td>' : '<td class="empty"></td>';
+    }
+    if (k.kept.includes(p)) {
+      const a = plan.assignments[slotKey(p, c)];
+      return a.teacher
+        ? `<td class="swapped">
+            <span class="cell-subject" style="color:${subjectColor(a.lesson.subject)}">${esc(a.lesson.subject)}</span>
+            <span class="cell-teacher"><s>${esc(a.lesson.teacher)}</s> ← <b>أ. ${esc(a.teacher)}</b></span>
+          </td>`
+        : `<td class="gap">
+            <span class="cell-subject">${esc(a.lesson.subject)}</span>
+            <span class="cell-teacher">بلا تغطية</span>
+          </td>`;
+    }
+    const l = [...k.pos].find(([, to]) => to === p)[0];
+    if (l.p === p) return cellHTML({ subject: l.subject, teacher: l.teacher });
+    return `<td class="moved">
+      <span class="cell-subject" style="color:${subjectColor(l.subject)}">${esc(l.subject)}</span>
+      <span class="cell-teacher"><b>أ. ${esc(l.teacher)}</b> ⏫ من ${esc(PERIOD_NAMES[l.p])}</span>
+    </td>`;
+  };
   let body = '';
   for (let p = 0; p < used; p++) {
-    body += `<tr><th>${periodLabel(p)}</th>`;
-    CLASSES.forEach((_, c) => {
-      const parsed = parseCell(TIMETABLE[DAYS[d]][p][c]);
-      if (!parsed) { body += '<td class="empty"></td>'; return; }
-      const a = plan.assignments[slotKey(p, c)];
-      if (!a) { body += cellHTML(parsed); return; }
-      if (a.teacher) {
-        body += `<td class="swapped">
-          <span class="cell-subject" style="color:${subjectColor(parsed.subject)}">${esc(parsed.subject)}</span>
-          <span class="cell-teacher"><s>${esc(parsed.teacher)}</s> ← <b>أ. ${esc(a.teacher)}</b></span>
-        </td>`;
-      } else {
-        body += `<td class="gap">
-          <span class="cell-subject">${esc(parsed.subject)}</span>
-          <span class="cell-teacher">بلا تغطية</span>
-        </td>`;
-      }
-    });
-    body += '</tr>';
+    body += `<tr><th>${periodLabel(p)}</th>` + CLASSES.map((_, c) => cellAt(p, c)).join('') + '</tr>';
   }
 
-  /* --- قائمة التوزيع القابلة للتعديل --- */
+  /* --- قائمة الشواغر القابلة للتعديل --- */
   const ordered = plan.affected.slice().sort((a, b) => a.p - b.p || a.c - b.c);
   const rows = ordered.map(lesson => {
     const key = slotKey(lesson.p, lesson.c);
     const a = plan.assignments[key];
+    const ov = STATE.overrides[key];
     const opts = availableFor(lesson, plan);
-    const badge = !a.teacher
-      ? '<span class="pill danger">لا تتوفر بديلة</span>'
-      : a.sameSubject
-        ? '<span class="pill ok">تدريس — التخصص نفسه</span>'
-        : '<span class="pill warn">إشغال ومتابعة</span>';
+    let what, badge;
+    if (a.type === 'compact') {
+      what = a.filler
+        ? `تُقدَّم ${esc(a.filler.lesson.subject)} أ. ${esc(a.filler.lesson.teacher)} من ${esc(PERIOD_NAMES[a.filler.from])}`
+        : 'انصراف مبكر';
+      badge = '<span class="pill ok">تقديم</span>';
+    } else if (a.type === 'cover') {
+      what = `إشغال أ. ${esc(a.teacher)}`;
+      badge = a.sameSubject ? '<span class="pill ok">إشغال — التخصص نفسه</span>' : '<span class="pill warn">إشغال إضافي</span>';
+    } else {
+      what = 'بلا تغطية';
+      badge = '<span class="pill danger">لا تتوفر بديلة</span>';
+    }
     return `<tr>
       <td>${esc(PERIOD_NAMES[lesson.p])}</td>
       <td><b>${esc(lesson.className)}</b></td>
       <td style="color:${subjectColor(lesson.subject)};font-weight:800">${esc(lesson.subject)}</td>
       <td><s>أ. ${esc(lesson.teacher)}</s></td>
+      <td>${what}</td>
       <td>
         <select class="pick" data-key="${key}">
-          <option value="">— بلا تغطية —</option>
-          ${opts.map(t => `<option value="${esc(t)}" ${a.teacher === t ? 'selected' : ''}>أ. ${esc(t)}</option>`).join('')}
+          <option value="auto" ${ov === undefined || ov === 'auto' ? 'selected' : ''}>تلقائي (تقديم ثم إشغال)</option>
+          ${opts.map(t => `<option value="${esc(t)}" ${ov === t ? 'selected' : ''}>إشغال: أ. ${esc(t)}</option>`).join('')}
+          <option value="" ${ov === '' ? 'selected' : ''}>— بلا تغطية —</option>
         </select>
         ${a.manual ? '<span class="pill manual">يدوي</span>' : ''}
       </td>
@@ -205,7 +338,6 @@ function renderPlan(plan) {
     </tr>`;
   }).join('');
 
-  /* --- عبء الإشغال على كل معلمة --- */
   const loadTags = helpers
     .sort((a, b) => plan.coverCount[b] - plan.coverCount[a] || a.localeCompare(b, 'ar'))
     .map(t => `<span class="tag ${plan.coverCount[t] > STATE.maxCover ? 'none' : 'free'}">أ. ${esc(t)}<b class="n">${plan.coverCount[t]}</b></span>`)
@@ -215,27 +347,32 @@ function renderPlan(plan) {
     <div class="card">
       <div class="card-title">📋 ملخّص خطة ${esc(DAYS[d])}</div>
       <div class="stats">
-        <div class="stat"><div class="num">${plan.affected.length}</div><div class="lbl">حصة متأثرة</div></div>
-        <div class="stat"><div class="num">${covered}</div><div class="lbl">حصة مُغطّاة</div></div>
+        <div class="stat"><div class="num">${plan.affected.length}</div><div class="lbl">حصة شاغرة</div></div>
+        <div class="stat"><div class="num">${compacted.length}</div><div class="lbl">سُدّت بالتقديم</div></div>
+        <div class="stat"><div class="num">${covers.length}</div><div class="lbl">إشغال إضافي</div></div>
         <div class="stat"><div class="num">${gaps.length}</div><div class="lbl">بلا تغطية</div></div>
-        <div class="stat"><div class="num">${helpers.length}</div><div class="lbl">معلمة مشاركة</div></div>
+        <div class="stat"><div class="num">${early.length}</div><div class="lbl">صف ينصرف أبكر</div></div>
       </div>
       ${gaps.length ? `<p class="hint danger-text">⚠️ ${gaps.length} حصة لم تُغطَّ لعدم توفر معلمة متفرغة:
         ${gaps.map(g => `${esc(PERIOD_NAMES[g.lesson.p])} / ${esc(g.lesson.className)}`).join(' — ')}</p>` : ''}
-      <div class="card-title" style="margin-top:16px">نصيب كل معلمة من الإشغال</div>
-      <div class="tag-list">${loadTags || '<span class="tag">—</span>'}</div>
+      <p class="hint">نُقلت ${moveCount} حصة إلى وقت أبكر، ولم تُلغَ أي حصة لمعلمة حاضرة إلا بعد أن أعطتها أبكر.</p>
+      <div class="card-title" style="margin-top:16px">ما يتغيّر في كل صف</div>
+      <div class="class-changes">${classCards}</div>
+      <div class="card-title" style="margin-top:16px">الإشغال الإضافي على كل معلمة</div>
+      <div class="tag-list">${loadTags || '<span class="tag">لا يوجد</span>'}</div>
     </div>
 
     <div class="card">
-      <div class="card-title">✏️ توزيع الحصص <span class="count">يمكن تعديل أي بديلة</span></div>
+      <div class="card-title">✏️ الحصص الشاغرة <span class="count">يمكن تعديل أي حصة</span></div>
       <div class="table-wrap">
-        <table class="grid list-table ${STATE.absent.size === 1 ? 'hide-absent' : ''}" style="min-width:720px">
-          <thead><tr><th>الحصة</th><th>الصف</th><th>المادة</th><th>الغائبة</th><th>البديلة</th><th>النوع</th></tr></thead>
+        <table class="grid list-table ${STATE.absent.size === 1 ? 'hide-absent' : ''}" style="min-width:820px">
+          <thead><tr><th>الحصة</th><th>الصف</th><th>المادة</th><th>الغائبة</th><th>المعالجة</th><th>تعديل</th><th>النوع</th></tr></thead>
           <tbody>${rows}</tbody>
         </table>
       </div>
       <p class="scroll-hint list-hint">مرّري الجدول أفقيًا 👈 لرؤية بقية الأعمدة</p>
-      <p class="hint">القائمة لا تعرض إلا المعلمات المتفرغات فعليًا في تلك الحصة، فأي تعديل يدوي يبقى بلا تضارب.</p>
+      <p class="hint">«تلقائي» يقدّم حصة متأخرة إن أمكن، وإلا يُسند إشغالًا. واختيار معلمة بعينها
+      يُبقي الحصة في مكانها ويُسند إشغالها إليها. القائمة لا تعرض إلا المتفرغات فعليًا بعد النقل.</p>
     </div>
 
     <div class="card">
@@ -244,18 +381,24 @@ function renderPlan(plan) {
         <table class="grid" style="min-width:900px"><thead>${head}</thead><tbody>${body}</tbody></table>
       </div>
       <p class="scroll-hint">مرّري الجدول أفقيًا 👈 لرؤية بقية الصفوف</p>
+      <p class="hint">⏫ حصة مُقدَّمة · 🟩 إشغال · «انصراف» الحصص التي يُعفى منها الصف.</p>
     </div>`;
 }
 
 /* ---------- نص جاهز للنسخ ---------- */
 function planText(plan) {
   const d = STATE.d;
-  const lines = [`إشغال يوم ${DAYS[d]}`];
+  const lines = [`خطة غياب يوم ${DAYS[d]}`];
   lines.push(`الغائبات: ${[...STATE.absent].map(t => 'أ. ' + t).join('، ') || '—'}`);
-  lines.push('');
-  plan.affected.slice().sort((a, b) => a.p - b.p || a.c - b.c).forEach(l => {
-    const a = plan.assignments[slotKey(l.p, l.c)];
-    lines.push(`${PERIOD_NAMES[l.p]} — ${l.className} (${l.subject}): ${a.teacher ? 'أ. ' + a.teacher : 'بلا تغطية'}`);
+  Object.entries(plan.classes).forEach(([c, k]) => {
+    lines.push('');
+    lines.push(`الصف ${CLASSES[c]}${k.newLen < k.len ? ` — ينصرف بعد الحصة ${PERIOD_NAMES[k.newLen - 1]}` : ''}:`);
+    k.moves.forEach(m => lines.push(`• أ. ${m.lesson.teacher} تُعطي ${m.lesson.subject} في الحصة ${PERIOD_NAMES[m.to]} بدل ${PERIOD_NAMES[m.from]}`));
+    k.kept.forEach(p => {
+      const a = plan.assignments[slotKey(p, +c)];
+      lines.push(`• الحصة ${PERIOD_NAMES[p]} (${a.lesson.subject}): ${a.teacher ? 'إشغال أ. ' + a.teacher : 'بلا تغطية'}`);
+    });
+    if (!k.moves.length && !k.kept.length) lines.push('• لا نقل، الشاغر في آخر اليوم');
   });
   return lines.join('\n');
 }
@@ -268,7 +411,7 @@ let CURRENT_PLAN = null;
 function render() {
   $('#day-picker').innerHTML = renderDayPicker();
   $('#absent-picker').innerHTML = renderAbsentPicker();
-  $('#opt-last').checked = STATE.lastFirst;
+  $('#opt-compact').checked = STATE.compact;
   $('#opt-max').value = STATE.maxCover;
 
   CURRENT_PLAN = buildPlan();
@@ -303,8 +446,8 @@ function init() {
   const tIdx = todayIndex();
   $('#today-label').textContent = tIdx >= 0 ? `اليوم: ${DAYS[tIdx]}` : 'عطلة نهاية الأسبوع';
 
-  $('#opt-last').addEventListener('change', e => {
-    STATE.lastFirst = e.target.checked;
+  $('#opt-compact').addEventListener('change', e => {
+    STATE.compact = e.target.checked;
     STATE.overrides = {};
     render();
   });
