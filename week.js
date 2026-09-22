@@ -18,8 +18,17 @@
     </tr>
     <tr>${CLASSES.map(() => '<th class="h2">الموضوع</th><th class="h2">المعلمة</th>').join('')}</tr>`;
 
+  /* ===== مواضع التفريغ: فراغات متساوية ===== */
+  const relief = (typeof RELIEF !== 'undefined' ? RELIEF : []);
+  const totalRows = DAYS.length * PERIOD_NAMES.length;
+  const RELIEF_AT = {};
+  const step = Math.floor(totalRows / relief.length);
+  const pad = Math.floor((totalRows - step * (relief.length - 1) - 1) / 2);
+  relief.forEach((r, i) => { RELIEF_AT[pad + i * step] = r; });
+
   /* ===== الجسم ===== */
   let body = '';
+  let rowIndex = 0;
   DAYS.forEach((day, d) => {
     for (let p = 0; p < PERIOD_NAMES.length; p++) {
       const isLast = p === PERIOD_NAMES.length - 1;
@@ -35,12 +44,9 @@
       body += p < used(d)                                   // الإشغال
         ? `<td class="free">${freeTeachers(d, p).map(esc).join(' · ')}</td>`
         : '<td class="x"></td>';
-      if (p === 0) {                                        // التفريغ
-        const rl = (typeof RELIEF !== 'undefined' && RELIEF[day]) || null;
-        body += `<td class="relief">${rl ? 'أ. ' + esc(rl.teacher) + '<br>' + esc(rl.task) : ''}</td>`;
-      } else {
-        body += '<td></td>';
-      }
+      const rl = RELIEF_AT[rowIndex];                       // التفريغ
+      body += `<td class="relief">${rl ? 'أ. ' + esc(rl.teacher) + ' — ' + esc(rl.task) : ''}</td>`;
+      rowIndex++;
       if (p === 0) {
         const duty = (typeof DUTY_ROSTER !== 'undefined' && DUTY_ROSTER[day]) || [];
         body += `<td rowspan="${PERIOD_NAMES.length}" class="duty">${
@@ -54,11 +60,8 @@
   /* ===== الحواشي ===== */
   const info = typeof TEACHER_INFO !== 'undefined' ? TEACHER_INFO : {};
   const sep = '  ·  ';
-  const shown = new Set(Object.values(typeof RELIEF !== 'undefined' ? RELIEF : {})
-    .filter(Boolean).map(r => r.teacher));
-  document.getElementById('duties').innerHTML = Object.entries(info)
-    .filter(([t, v]) => v.duty && !shown.has(t))
-    .map(([t, v]) => `أ. ${esc(t)} — ${esc(v.duty)}`).join(sep) || '—';
+  document.getElementById('duties').innerHTML =
+    relief.map(r => `أ. ${esc(r.teacher)} — ${esc(r.task)}`).join(sep) || '—';
   document.getElementById('homes').innerHTML = Object.entries(info)
     .filter(([, v]) => v.home).map(([t, v]) => `${esc(v.home)}: أ. ${esc(t)}`).join(sep) || '—';
   document.getElementById('meta').textContent =
