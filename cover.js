@@ -34,9 +34,8 @@ const DISPENSABLE = ['فن', 'مهني', 'رياضة'];
       فتُقدَّم إلى مكانها حصته الأخيرة (إن كانت معلمتها متفرغة)
       وينصرف مع البقية.
    ٢) الإشغال الإضافي: ما تعذّر سدّه بالتقديم تُغطّيه معلمة
-      متفرغة، بالأولويات:
-      • تُدرّس المادة نفسها لهذا الصف ← الأفضل
-      • تُدرّس المادة نفسها
+      متفرغة إشغالًا فقط (لا تُعطي حصة الغائبة ولو كانت من
+      التخصص نفسه)، بالأولويات:
       • تُدرّس الصف نفسه
       • الأقل عددًا في حصص الإشغال اليوم (توزيع عادل)
       • الأقل نصابًا أسبوعيًا
@@ -227,8 +226,7 @@ function buildPlan() {
     if (pick === undefined || pick === 'auto') return;
     if (pick && isAvailable(pick, lesson.p)) {
       reserve(lesson.p, pick);
-      assignments[key] = { lesson, type: 'cover', teacher: pick, manual: true,
-        sameSubject: teachesSubject(pick, lesson.subject) };
+      assignments[key] = { lesson, type: 'cover', teacher: pick, manual: true };
     } else {
       assignments[key] = { lesson, type: 'gap', teacher: null, manual: true };
     }
@@ -241,19 +239,15 @@ function buildPlan() {
     if (!candidates.length) { assignments[key] = { lesson, type: 'gap', teacher: null }; return; }
     const scored = candidates.map(t => {
       let score = 0;
-      const sameSubject = teachesSubject(t, lesson.subject);
-      const sameClass = teachesClass(t, lesson.c);
-      if (sameSubject && sameClass) score += 160;
-      else if (sameSubject) score += 100;
-      else if (sameClass) score += 40;
+      if (teachesClass(t, lesson.c)) score += 40;
       if (coverCount[t] >= STATE.maxCover) score -= 1000;   // تجاوز الحد: مقبول عند الضرورة فقط
       score -= coverCount[t] * 25;
       score -= WEEKLY_LOAD[t] * 0.4;
-      return { t, score, sameSubject, sameClass };
+      return { t, score };
     }).sort((a, b) => b.score - a.score || a.t.localeCompare(b.t, 'ar'));
     const best = scored[0];
     reserve(lesson.p, best.t);
-    assignments[key] = { lesson, type: 'cover', teacher: best.t, sameSubject: best.sameSubject };
+    assignments[key] = { lesson, type: 'cover', teacher: best.t };
   });
 
   return { affected, assignments, coverCount, usedInPeriod, classes, busy, lone };
@@ -385,7 +379,7 @@ function renderPlan(plan) {
       badge = '<span class="pill ok">تقديم</span>';
     } else if (a.type === 'cover') {
       what = `إشغال أ. ${esc(a.teacher)}`;
-      badge = a.sameSubject ? '<span class="pill ok">إشغال — التخصص نفسه</span>' : '<span class="pill warn">إشغال إضافي</span>';
+      badge = '<span class="pill warn">إشغال إضافي</span>';
     } else {
       what = 'بلا تغطية';
       badge = '<span class="pill danger">لا تتوفر بديلة</span>';
