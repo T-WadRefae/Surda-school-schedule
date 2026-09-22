@@ -6,12 +6,12 @@
   <title>الجدول الأسبوعي — نسخة الطباعة</title>
   <link rel="icon" type="image/png" href="assets/logo.png" />
   <style>
-  @page { size: A3 landscape; margin: 7mm 8mm; }
+  @page { size: A3 landscape; margin: 5mm 7mm; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: "Noto Naskh Arabic", "Noto Sans Arabic", "DejaVu Sans", serif;
          color: #000; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .head { display: flex; align-items: baseline; gap: 10mm; margin-bottom: 2.5mm; }
-  .head h1 { margin: 0; font-size: 12.5pt; font-weight: 700; }
+  .head { display: flex; align-items: baseline; gap: 8mm; margin-bottom: 1.6mm; }
+  .head h1 { margin: 0; font-size: 11.5pt; font-weight: 700; }
   .head .meta { font-size: 9pt; }
   .head .by { margin-inline-start: auto; font-size: 8pt; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -29,11 +29,11 @@
   td.t { color: #000; }
   td.x { background: #f0f0f0; }
   td.free { font-size: 11pt; text-align: center; }
-  td.relief { font-size: 9pt; font-weight: 700; line-height: 1.2; white-space: nowrap; }
+  td.relief { font-size: 9pt; font-weight: 700; line-height: 1.2; }
   td.duty { font-size: 12pt; font-weight: 700; line-height: 1.8; vertical-align: middle; }
   tbody tr { height: 5.9mm; }
   tr.day-end td, tr.day-end th { border-bottom: 2.5pt solid #C00000; }
-  .legend { margin-top: 2mm; font-size: 9pt; display: flex; flex-direction: column; gap: 1mm; }
+  .legend { margin-top: 1.4mm; font-size: 8.5pt; display: flex; flex-direction: column; gap: 1mm; }
   .legend b { font-weight: 700; }
 
   /* على الشاشة فقط */
@@ -54,10 +54,8 @@
     padding: 16px; border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.08);
     overflow-x: auto;
   }
-  .page2 { margin-top: 18px; }
   .c-freelist { width: 250mm; }
   @media print {
-    .page2 { break-before: page; page-break-before: always; margin-top: 0; }
     body { background: #fff; padding: 0; }
     .bar { display: none !important; }
     .sheet { box-shadow: none; border-radius: 0; padding: 0; max-width: none; overflow: visible; }
@@ -83,14 +81,6 @@
       <div><b>التفريغ:</b> <span id="duties"></span></div>
       <div><b>تربية الصف:</b> <span id="homes"></span></div>
     </div>
-  </div>
-
-  <div class="sheet page2">
-    <div class="head">
-      <h1>الإشغال — المعلمات المتفرغات في كل حصة</h1>
-      <span class="by" dir="ltr">T. Wad Refae</span>
-    </div>
-    <table><colgroup id="cols2"></colgroup><thead id="thead2"></thead><tbody id="tbody2"></tbody></table>
   </div>
 
   <script src="data.js"></script>

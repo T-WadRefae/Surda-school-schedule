@@ -6,14 +6,39 @@
 (function () {
   const used = (d) => periodsUsed(d);
 
-  /* ===== عروض الأعمدة بالمليمتر ===== */
-  const W = { day: 18, per: 17, subj: 21, teach: 13, relief: 32, duty: 20 };
+  /* اختصارات الطباعة لأطول أسماء المواد — كما في ورقة المدرسة */
+  const SHORT = { 'اجتماعيات': 'اجتماع', 'تكنولوجيا': 'تكنو' };
+  const shortSubj = (x) => SHORT[x] || x;
+
+  /* ===== المقاسات: كلها مشتقّة من حجم الخط ===== */
+  const FS = window.__FS || 11.2;               // حجم خط الجدول بالنقاط
+  const AVAIL = 405;                            // عرض A3 أفقي بعد الهوامش
+  const W = {
+    day:    Math.round(FS * 1.45 * 10) / 10,
+    per:    Math.round(FS * 1.40 * 10) / 10,
+    subj:   Math.round(FS * 1.34 * 10) / 10,
+    teach:  Math.round(FS * 1.14 * 10) / 10,
+    relief: Math.round(FS * 1.85 * 10) / 10,
+    duty:   Math.round(FS * 1.60 * 10) / 10
+  };
+  W.free = +(AVAIL - W.day - W.per - CLASSES.length * (W.subj + W.teach)
+             - W.relief - W.duty).toFixed(1);
+  window.__W = W;
+
+  const st = document.createElement('style');
+  st.textContent = `
+    th, td { font-size: ${FS}pt !important; }
+    thead th.h2 { font-size: ${(FS * 0.85).toFixed(1)}pt !important; }
+    th.day { font-size: ${(FS * 1.12).toFixed(1)}pt !important; }
+    td.free { font-size: ${(FS * 0.78).toFixed(1)}pt !important; letter-spacing: -.1pt; }
+    td.relief { font-size: ${(FS * 0.82).toFixed(1)}pt !important; }
+    tbody tr { height: ${(FS * 0.47).toFixed(2)}mm; }`;
+  document.head.appendChild(st);
+
   document.getElementById('cols1').innerHTML =
     `<col style="width:${W.day}mm"><col style="width:${W.per}mm">` +
     CLASSES.map(() => `<col style="width:${W.subj}mm"><col style="width:${W.teach}mm">`).join('') +
-    `<col style="width:${W.relief}mm"><col style="width:${W.duty}mm">`;
-  document.getElementById('cols2').innerHTML =
-    `<col style="width:${W.day}mm"><col style="width:${W.per}mm"><col>`;
+    `<col style="width:${W.free}mm"><col style="width:${W.relief}mm"><col style="width:${W.duty}mm">`;
 
   /* ===== الرأس ===== */
   document.getElementById('thead').innerHTML = `
@@ -21,6 +46,7 @@
       <th rowspan="2" class="c-day">اليوم</th>
       <th rowspan="2" class="c-per">الحصة</th>
       ${CLASSES.map(c => `<th colspan="2" class="c-cls">${esc(c)}</th>`).join('')}
+      <th rowspan="2">الإشغال — المتفرغات</th>
       <th rowspan="2" class="c-free">التفريغ</th>
       <th rowspan="2" class="c-duty">المناوبات</th>
     </tr>
@@ -47,11 +73,14 @@
       CLASSES.forEach((_, c) => {
         const x = parseCell(TIMETABLE[day][p][c]);
         body += x
-          ? `<td class="s">${esc(x.subject)}</td><td class="t">${esc(x.teacher)}</td>`
+          ? `<td class="s">${esc(shortSubj(x.subject))}</td><td class="t">${esc(x.teacher)}</td>`
           : '<td class="x"></td><td class="x"></td>';
       });
+      body += p < used(d)                                   // الإشغال
+        ? `<td class="free">${freeTeachers(d, p).map(esc).join(' · ')}</td>`
+        : '<td class="x"></td>';
       const rl = RELIEF_AT[rowIndex];                       // التفريغ
-      body += `<td class="relief">${rl ? 'أ. ' + esc(rl.teacher) + ' — ' + esc(rl.task) : ''}</td>`;
+      body += `<td class="relief">${rl ? 'أ. ' + esc(rl.teacher) + '<br>' + esc(rl.task) : ''}</td>`;
       rowIndex++;
       if (p === 0) {
         const duty = (typeof DUTY_ROSTER !== 'undefined' && DUTY_ROSTER[day]) || [];
@@ -62,22 +91,6 @@
     }
   });
   document.getElementById('tbody').innerHTML = body;
-
-  /* ===== صفحة الإشغال ===== */
-  document.getElementById('thead2').innerHTML = `
-    <tr><th class="c-day">اليوم</th><th class="c-per">الحصة</th>
-        <th class="c-freelist">المعلمات المتفرغات</th></tr>`;
-  let b2 = '';
-  DAYS.forEach((day, d) => {
-    for (let p = 0; p < used(d); p++) {
-      const isLast = p === used(d) - 1;
-      b2 += `<tr class="${isLast ? 'day-end' : ''}">`;
-      if (p === 0) b2 += `<th rowspan="${used(d)}" class="day">${esc(day)}</th>`;
-      b2 += `<th class="per">${esc(PERIOD_NAMES[p])}</th>`;
-      b2 += `<td class="free">${freeTeachers(d, p).map(esc).join('  ·  ')}</td></tr>`;
-    }
-  });
-  document.getElementById('tbody2').innerHTML = b2;
 
   /* ===== الحواشي ===== */
   const info = typeof TEACHER_INFO !== 'undefined' ? TEACHER_INFO : {};
