@@ -36,6 +36,7 @@ const DISPENSABLE = ['فن', 'مهني', 'رياضة'];
    ٢) الإشغال الإضافي: ما تعذّر سدّه بالتقديم تُغطّيه معلمة
       متفرغة إشغالًا فقط (لا تُعطي حصة الغائبة ولو كانت من
       التخصص نفسه)، بالأولويات:
+      • جدول الإشغال (COVER_ROTA): الأول ثم الثاني ثم الثالث
       • تُدرّس الصف نفسه
       • الأقل عددًا في حصص الإشغال اليوم (توزيع عادل)
       • الأقل نصابًا أسبوعيًا
@@ -92,6 +93,12 @@ function compactClass(present, len, vac, forced, busy) {
     if (best) return best;
   }
   return null;
+}
+
+/** مرتبة المعلمة في جدول الإشغال لهذه الحصة: ٠ أول، ١ ثانٍ، ٢ ثالث، -١ ليست فيه */
+function rotaRank(t, p) {
+  const row = typeof COVER_ROTA !== 'undefined' && COVER_ROTA[DAYS[STATE.d]] && COVER_ROTA[DAYS[STATE.d]][p];
+  return row ? row.indexOf(t) : -1;
 }
 
 function buildPlan() {
@@ -239,6 +246,8 @@ function buildPlan() {
     if (!candidates.length) { assignments[key] = { lesson, type: 'gap', teacher: null }; return; }
     const scored = candidates.map(t => {
       let score = 0;
+      const rank = rotaRank(t, lesson.p);
+      if (rank >= 0) score += 300 - rank * 100;             // الأول ثم الثاني ثم الثالث
       if (teachesClass(t, lesson.c)) score += 40;
       if (coverCount[t] >= STATE.maxCover) score -= 1000;   // تجاوز الحد: مقبول عند الضرورة فقط
       score -= coverCount[t] * 25;
@@ -379,7 +388,10 @@ function renderPlan(plan) {
       badge = '<span class="pill ok">تقديم</span>';
     } else if (a.type === 'cover') {
       what = `إشغال أ. ${esc(a.teacher)}`;
-      badge = '<span class="pill warn">إشغال إضافي</span>';
+      const rk = rotaRank(a.teacher, lesson.p);
+      badge = rk >= 0
+        ? `<span class="pill ok">إشغال ${['أول', 'ثانٍ', 'ثالث'][rk]}</span>`
+        : '<span class="pill warn">إشغال من خارج الجدول</span>';
     } else {
       what = 'بلا تغطية';
       badge = '<span class="pill danger">لا تتوفر بديلة</span>';

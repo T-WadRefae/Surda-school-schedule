@@ -30,7 +30,8 @@
     th, td { font-size: ${FS}pt !important; }
     thead th.h2 { font-size: ${(FS * 0.85).toFixed(1)}pt !important; }
     th.day { font-size: ${(FS * 1.12).toFixed(1)}pt !important; }
-    td.free { font-size: ${(FS * 0.78).toFixed(1)}pt !important; letter-spacing: -.1pt; }
+    td.rota { font-size: ${(FS * 0.95).toFixed(1)}pt !important; }
+    td.rota.r1 { font-weight: 700; }
     td.relief { font-size: ${(FS * 0.82).toFixed(1)}pt !important; }
     tbody tr { height: ${(FS * 0.47).toFixed(2)}mm; }`;
   document.head.appendChild(st);
@@ -38,7 +39,8 @@
   document.getElementById('cols1').innerHTML =
     `<col style="width:${W.day}mm"><col style="width:${W.per}mm">` +
     CLASSES.map(() => `<col style="width:${W.subj}mm"><col style="width:${W.teach}mm">`).join('') +
-    `<col style="width:${W.free}mm"><col style="width:${W.relief}mm"><col style="width:${W.duty}mm">`;
+    [1, 2, 3].map(() => `<col style="width:${(W.free / 3).toFixed(1)}mm">`).join('') +
+    `<col style="width:${W.relief}mm"><col style="width:${W.duty}mm">`;
 
   /* ===== الرأس ===== */
   document.getElementById('thead').innerHTML = `
@@ -46,12 +48,13 @@
       <th rowspan="2" class="c-day">اليوم</th>
       <th rowspan="2" class="c-per">الحصة</th>
       ${CLASSES.map(c => `<th colspan="2" class="c-cls">${esc(c)}</th>`).join('')}
-      <th rowspan="2">الإشغال — المتفرغات</th>
+      <th colspan="3">الإشغال</th>
       <th rowspan="2" class="c-free">التفريغ</th>
       <th rowspan="2" class="c-duty">المناوبات</th>
     </tr>
     <tr>${CLASSES.map(() =>
-        '<th class="h2 w-subj">الموضوع</th><th class="h2 w-teach">المعلمة</th>').join('')}</tr>`;
+        '<th class="h2 w-subj">الموضوع</th><th class="h2 w-teach">المعلمة</th>').join('')}
+      <th class="h2">الأول</th><th class="h2">الثاني</th><th class="h2">الثالث</th></tr>`;
 
   /* ===== مواضع التفريغ: فراغات متساوية ===== */
   const relief = (typeof RELIEF !== 'undefined' ? RELIEF : []);
@@ -76,9 +79,10 @@
           ? `<td class="s">${esc(shortSubj(x.subject))}</td><td class="t">${esc(x.teacher)}</td>`
           : '<td class="x"></td><td class="x"></td>';
       });
-      body += p < used(d)                                   // الإشغال
-        ? `<td class="free">${freeTeachers(d, p).map(esc).join(' · ')}</td>`
-        : '<td class="x"></td>';
+      const rota = (typeof COVER_ROTA !== 'undefined' && COVER_ROTA[day] && COVER_ROTA[day][p]) || null;
+      body += p < used(d) && rota                           // الإشغال: أول، ثانٍ، ثالث
+        ? rota.map((t, k) => `<td class="rota r${k + 1}">${esc(t)}</td>`).join('')
+        : '<td class="x"></td><td class="x"></td><td class="x"></td>';
       const rl = RELIEF_AT[rowIndex];                       // التفريغ
       body += `<td class="relief">${rl ? 'أ. ' + esc(rl.teacher) + '<br>' + esc(rl.task) : ''}</td>`;
       rowIndex++;
@@ -99,7 +103,9 @@
     relief.map(r => `أ. ${esc(r.teacher)} — ${esc(r.task)}`).join(sep) || '—';
   document.querySelector('.legend').firstElementChild.hidden = true;
   document.getElementById('homes').innerHTML = Object.entries(info)
-    .filter(([, v]) => v.home).map(([t, v]) => `${esc(v.home)}: أ. ${esc(t)}`).join(sep) || '—';
+    .filter(([, v]) => v.home)
+    .sort((a, b) => CLASSES.indexOf(a[1].home) - CLASSES.indexOf(b[1].home))
+    .map(([t, v]) => `${esc(v.home)}: أ. ${esc(t)}`).join(sep) || '—';
   document.getElementById('meta').textContent =
     `${CLASSES.length} صفوف · ${TEACHERS.length} معلمة · ${DAYS.length} أيام`;
 })();

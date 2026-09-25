@@ -99,19 +99,28 @@ function renderTeacherView(teacher) {
   const freeRows = DAYS.map((day, d) => {
     const used = periodsUsed(d);
     const free = [];
-    for (let p = 0; p < used; p++) if (!lessonsOf(teacher, d, p).length) free.push(PERIOD_NAMES[p]);
+    for (let p = 0; p < used; p++) {
+      if (lessonsOf(teacher, d, p).length) continue;
+      const rk = rotaRankOf(teacher, day, p);
+      free.push(rk >= 0
+        ? `<span class="tag rota">${esc(PERIOD_NAMES[p])} · إشغال ${ROTA_LABELS[rk]}</span>`
+        : `<span class="tag free">${esc(PERIOD_NAMES[p])}</span>`);
+    }
     return `<div class="free-row">
       <div class="p-name">${esc(day)}</div>
       <div class="tag-list">${free.length
-        ? free.map(f => `<span class="tag free">${esc(f)}</span>`).join('')
+        ? free.join('')
         : '<span class="tag none">لا توجد حصص فارغة</span>'}</div>
     </div>`;
   }).join('');
 
   const info = (typeof TEACHER_INFO !== 'undefined' && TEACHER_INFO[teacher]) || {};
+  const rotaN = [0, 1, 2].map(k => DAYS.reduce((n, day) =>
+    n + ((typeof COVER_ROTA !== 'undefined' && COVER_ROTA[day]) || []).filter(r => r[k] === teacher).length, 0));
   const badges = [
     info.home ? `<span class="count">تربية الصف ${esc(info.home)}</span>` : '',
-    info.duty ? `<span class="count">تفريغ: ${esc(info.duty)}</span>` : ''
+    info.duty ? `<span class="count">تفريغ: ${esc(info.duty)}</span>` : '',
+    rotaN.some(Boolean) ? `<span class="count">الإشغال: ${rotaN.map((n, k) => `${ROTA_LABELS[k]} ${n}`).join(' · ')}</span>` : ''
   ].join('');
 
   return `
@@ -185,6 +194,14 @@ function renderDayView(day) {
 /* ==========================================================
    4) الإشغال — المعلمات المتفرغات في كل حصة
    ========================================================== */
+const ROTA_LABELS = ['أول', 'ثانٍ', 'ثالث'];
+
+/** مرتبة المعلمة في جدول الإشغال: ٠ أول، ١ ثانٍ، ٢ ثالث، -١ ليست فيه */
+function rotaRankOf(teacher, day, p) {
+  const row = typeof COVER_ROTA !== 'undefined' && COVER_ROTA[day] && COVER_ROTA[day][p];
+  return row ? row.indexOf(teacher) : -1;
+}
+
 function renderFreeView(day) {
   const d = DAYS.indexOf(day);
   const used = periodsUsed(d);
@@ -192,10 +209,13 @@ function renderFreeView(day) {
   let rows = '';
   for (let p = 0; p < used; p++) {
     const free = freeTeachers(d, p);
+    const rota = ((typeof COVER_ROTA !== 'undefined' && COVER_ROTA[day]) || [])[p] || [];
+    const tags = rota.map((t, k) => `<span class="tag rota">إشغال ${ROTA_LABELS[k]}: أ. ${esc(t)}</span>`)
+      .concat(free.filter(t => !rota.includes(t)).map(t => `<span class="tag free">أ. ${esc(t)}</span>`));
     rows += `<div class="free-row">
       <div class="p-name">${esc(PERIOD_NAMES[p])}</div>
-      <div class="tag-list">${free.length
-        ? free.map(t => `<span class="tag free">أ. ${esc(t)}</span>`).join('')
+      <div class="tag-list">${tags.length
+        ? tags.join('')
         : '<span class="tag none">جميع المعلمات مشغولات</span>'}</div>
     </div>`;
   }
@@ -204,7 +224,7 @@ function renderFreeView(day) {
     <div class="card">
       <div class="card-title">🔁 الإشغال ليوم ${esc(day)}</div>
       <div class="free-list">${rows}</div>
-      <p class="hint">تُحسب القائمة تلقائيًا: كل معلمة ليس لديها حصة في ذلك الوقت تظهر كمتفرغة للإشغال.</p>
+      <p class="hint">الإشغال الأول ثم الثاني ثم الثالث حسب جدول الإشغال المعتمد، وبعدهن بقية المعلمات المتفرغات في تلك الحصة.</p>
     </div>`;
 }
 
