@@ -338,41 +338,6 @@ function renderPlan(plan) {
     </div>`;
   }).join('');
 
-  /* --- جدول اليوم بعد التعديل --- */
-  const head = '<tr><th>الحصة</th>' + CLASSES.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
-  const cellAt = (p, c) => {
-    const k = plan.classes[c];
-    if (!k) {
-      const parsed = parseCell(TIMETABLE[DAYS[d]][p][c]);
-      return parsed ? cellHTML(parsed) : '<td class="empty"></td>';
-    }
-    if (p >= k.newLen) {
-      return p < k.len ? '<td class="out"><span class="cell-teacher">انصراف</span></td>' : '<td class="empty"></td>';
-    }
-    if (k.kept.includes(p)) {
-      const a = plan.assignments[slotKey(p, c)];
-      return a.teacher
-        ? `<td class="swapped">
-            <span class="cell-subject" style="color:${subjectColor(a.lesson.subject)}">${esc(a.lesson.subject)}</span>
-            <span class="cell-teacher"><s>${esc(a.lesson.teacher)}</s> ← <b>أ. ${esc(a.teacher)}</b></span>
-          </td>`
-        : `<td class="gap">
-            <span class="cell-subject">${esc(a.lesson.subject)}</span>
-            <span class="cell-teacher">بلا تغطية</span>
-          </td>`;
-    }
-    const l = [...k.pos].find(([, to]) => to === p)[0];
-    if (l.p === p) return cellHTML({ subject: l.subject, teacher: l.teacher });
-    return `<td class="moved">
-      <span class="cell-subject" style="color:${subjectColor(l.subject)}">${esc(l.subject)}</span>
-      <span class="cell-teacher"><b>أ. ${esc(l.teacher)}</b> ⏫ من ${esc(PERIOD_NAMES[l.p])}</span>
-    </td>`;
-  };
-  let body = '';
-  for (let p = 0; p < used; p++) {
-    body += `<tr><th>${periodLabel(p)}</th>` + CLASSES.map((_, c) => cellAt(p, c)).join('') + '</tr>';
-  }
-
   /* --- قائمة الشواغر القابلة للتعديل --- */
   const ordered = plan.affected.slice().sort((a, b) => a.p - b.p || a.c - b.c);
   const rows = ordered.map(lesson => {
@@ -456,14 +421,252 @@ function renderPlan(plan) {
       يُبقي الحصة في مكانها ويُسند إشغالها إليها. القائمة لا تعرض إلا المتفرغات فعليًا بعد النقل.</p>
     </div>
 
-    <div class="card">
-      <div class="card-title">📆 جدول ${esc(DAYS[d])} بعد التعديل</div>
-      <div class="table-wrap">
-        <table class="grid" style="min-width:900px"><thead>${head}</thead><tbody>${body}</tbody></table>
+    ${renderDayCard(plan)}`;
+}
+
+
+/* ==========================================================
+   الجدول بعد التعديل — خانات قابلة للتحرير والنقل اليدوي
+   ----------------------------------------------------------
+   الخانة: { s: المادة، t: المعلمة، kind، … } حيث kind:
+     normal حصة في مكانها · moved حصة مُقدَّمة · cover إشغال
+     gap بلا تغطية · out انصراف · none لا دوام للصف
+   في وضع التحرير: الضغط على خانتين يبدّلهما (أو السحب والإفلات)،
+   والخانة المحدَّدة تُعدَّل من لوحة التحرير. أي تضارب يُظلَّل فورًا.
+   ========================================================== */
+const EDIT = { on: false, grid: null, sel: null, sig: '' };
+
+const planSignature = () => [STATE.d, [...STATE.absent].sort().join(','), STATE.compact,
+  STATE.dropOk, STATE.maxCover, JSON.stringify(STATE.overrides)].join('|');
+
+/** خانات جدول اليوم كما بنتها الخطة التلقائية: grid[حصة][صف] */
+function autoGrid(plan) {
+  const d = STATE.d;
+  const grid = [];
+  for (let p = 0; p < NP_EDIT(); p++) {
+    grid.push(CLASSES.map((_, c) => {
+      const k = plan.classes[c];
+      if (!k) {
+        const x = parseCell(TIMETABLE[DAYS[d]][p][c]);
+        return x ? { s: x.subject, t: x.teacher, kind: 'normal' } : { kind: 'none' };
+      }
+      if (p >= k.newLen) return { kind: p < k.len ? 'out' : 'none' };
+      if (k.kept.includes(p)) {
+        const a = plan.assignments[slotKey(p, c)];
+        return a.teacher
+          ? { s: a.lesson.subject, t: a.teacher, kind: 'cover', orig: a.lesson.teacher }
+          : { s: a.lesson.subject, kind: 'gap', orig: a.lesson.teacher };
+      }
+      const l = [...k.pos].find(([, to]) => to === p)[0];
+      return l.p === p
+        ? { s: l.subject, t: l.teacher, kind: 'normal' }
+        : { s: l.subject, t: l.teacher, kind: 'moved', from: l.p };
+    }));
+  }
+  return grid;
+}
+
+/** عدد حصص اليوم المعروضة (حتى السابعة كي يمكن النقل إليها) */
+const NP_EDIT = () => Math.max(periodsUsed(STATE.d), 1);
+
+const isFilled = x => x.kind !== 'out' && x.kind !== 'none';
+
+/** التضارب: معلمة في مكانين، أو معلمة غائبة، أو حصة فارغة وسط يوم الصف */
+function gridIssues(grid) {
+  const bad = new Set();
+  const msgs = [];
+  grid.forEach((row, p) => {
+    const seen = {};
+    row.forEach((x, c) => { if (x.t) (seen[x.t] = seen[x.t] || []).push(c); });
+    Object.entries(seen).forEach(([t, cs]) => {
+      if (STATE.absent.has(t)) {
+        cs.forEach(c => bad.add(`${p}-${c}`));
+        msgs.push(`الحصة ${PERIOD_NAMES[p]}: أ. ${t} غائبة اليوم (الصف ${cs.map(c => CLASSES[c]).join('، ')})`);
+      } else if (cs.length > 1) {
+        cs.forEach(c => bad.add(`${p}-${c}`));
+        msgs.push(`الحصة ${PERIOD_NAMES[p]}: أ. ${t} في ${cs.map(c => 'الصف ' + CLASSES[c]).join(' و')} في الوقت نفسه`);
+      }
+    });
+  });
+  CLASSES.forEach((cl, c) => {
+    const filled = grid.map(r => isFilled(r[c]));
+    const last = filled.lastIndexOf(true);
+    for (let p = 0; p < last; p++) {
+      if (!filled[p]) {
+        bad.add(`${p}-${c}`);
+        msgs.push(`الصف ${cl}: الحصة ${PERIOD_NAMES[p]} فارغة وسط اليوم`);
+      }
+    }
+  });
+  return { bad, msgs };
+}
+
+const cellText = x => !isFilled(x) ? (x.kind === 'out' ? 'انصراف' : 'لا دوام')
+  : x.kind === 'gap' ? `${x.s} — بلا تغطية` : `${x.s} — أ. ${x.t}`;
+
+function gridCellHTML(x, p, c, issues) {
+  const key = `${p}-${c}`;
+  const cls = [];
+  let inner = '';
+  if (x.kind === 'none') cls.push('empty');
+  else if (x.kind === 'out') { cls.push('out'); inner = '<span class="cell-teacher">انصراف</span>'; }
+  else if (x.kind === 'gap') {
+    cls.push('gap');
+    inner = `<span class="cell-subject">${esc(x.s)}</span><span class="cell-teacher">بلا تغطية</span>`;
+  } else if (x.kind === 'cover') {
+    cls.push('swapped');
+    inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
+      <span class="cell-teacher"><s>${esc(x.orig)}</s> ← <b>أ. ${esc(x.t)}</b></span>`;
+  } else if (x.kind === 'moved') {
+    cls.push('moved');
+    inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
+      <span class="cell-teacher"><b>أ. ${esc(x.t)}</b> ⏫ من ${esc(PERIOD_NAMES[x.from])}</span>`;
+  } else {
+    inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
+      <span class="cell-teacher">أ. ${esc(x.t)}</span>`;
+  }
+  if (x.manual) cls.push('manual');
+  if (issues.bad.has(key)) cls.push('clash');
+  if (EDIT.on) {
+    cls.push('editable');
+    if (EDIT.sel === key) cls.push('sel');
+  }
+  const attrs = EDIT.on ? ` data-cell="${key}"${isFilled(x) ? ' draggable="true"' : ''}` : '';
+  return `<td class="${cls.join(' ')}"${attrs}>${inner}</td>`;
+}
+
+function editorHTML(grid) {
+  if (!EDIT.on || !EDIT.sel) {
+    return EDIT.on ? `<p class="hint edit-hint">اضغطي على خانة لتحديدها ثم على خانة أخرى لتبديلهما،
+      أو اسحبيها وأفلتيها في مكانها الجديد. والخانة المحدَّدة تُعدَّل من هنا.</p>` : '';
+  }
+  const [p, c] = EDIT.sel.split('-').map(Number);
+  const x = grid[p][c];
+  const subjects = [...new Set(LESSONS.map(l => l.subject))].sort((a, b) => a.localeCompare(b, 'ar'));
+  const busyAt = {};
+  grid[p].forEach((y, cc) => { if (y.t && cc !== c) busyAt[y.t] = CLASSES[cc]; });
+  const teachers = TEACHERS.filter(t => !STATE.absent.has(t));
+  return `<div class="editor">
+    <b>الصف ${esc(CLASSES[c])} — الحصة ${esc(PERIOD_NAMES[p])}</b>
+    <label>المادة
+      <select id="ed-subject">${subjects.map(s => `<option ${x.s === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
+    </label>
+    <label>المعلمة
+      <select id="ed-teacher">${teachers.map(t => `<option value="${esc(t)}" ${x.t === t ? 'selected' : ''}>أ. ${esc(t)}${busyAt[t] ? ` (مشغولة: ${esc(busyAt[t])})` : ''}</option>`).join('')}</select>
+    </label>
+    <div class="editor-actions">
+      <button class="btn" id="ed-apply">تطبيق</button>
+      <button class="btn btn-ghost" id="ed-clear">تفريغ الخانة</button>
+      <button class="btn btn-ghost" id="ed-cancel">إلغاء التحديد</button>
+    </div>
+  </div>`;
+}
+
+function renderDayCard(plan) {
+  const d = STATE.d;
+  const grid = EDIT.grid || autoGrid(plan);
+  const issues = gridIssues(grid);
+  const head = '<tr><th>الحصة</th>' + CLASSES.map(c => `<th>${esc(c)}</th>`).join('') + '</tr>';
+  const body = grid.map((row, p) =>
+    `<tr><th>${periodLabel(p)}</th>${row.map((x, c) => gridCellHTML(x, p, c, issues)).join('')}</tr>`).join('');
+  const changed = EDIT.grid ? manualChanges(plan).length : 0;
+  return `<div class="card">
+      <div class="card-title">📆 جدول ${esc(DAYS[d])} بعد التعديل
+        <span class="edit-bar no-print">
+          <button class="btn ${EDIT.on ? '' : 'btn-ghost'}" id="edit-toggle">${EDIT.on ? '✔ إنهاء التحرير' : '✏️ تحرير'}</button>
+          ${changed ? `<button class="btn btn-ghost" id="edit-reset">↺ إلغاء التعديلات اليدوية (${changed})</button>` : ''}
+        </span>
+      </div>
+      ${editorHTML(grid)}
+      ${issues.msgs.length ? `<div class="clash-list">⚠️ ${issues.msgs.map(esc).join('<br>⚠️ ')}</div>` : ''}
+      <div class="table-wrap" id="day-wrap">
+        <table class="grid ${EDIT.on ? 'editing' : ''}" style="min-width:900px"><thead>${head}</thead><tbody>${body}</tbody></table>
       </div>
       <p class="scroll-hint">مرّري الجدول أفقيًا 👈 لرؤية بقية الصفوف</p>
-      <p class="hint">⏫ حصة مُقدَّمة · 🟩 إشغال · «انصراف» الحصص التي يُعفى منها الصف.</p>
+      <p class="hint">⏫ حصة مُقدَّمة · 🟩 إشغال · «انصراف» الحصص التي يُعفى منها الصف
+        ${EDIT.grid ? ' · الإطار البنفسجي: تعديل يدوي' : ''} · الإطار الأحمر: تضارب.</p>
     </div>`;
+}
+
+/** الفروق بين الجدول اليدوي والخطة التلقائية */
+function manualChanges(plan) {
+  if (!EDIT.grid) return [];
+  const auto = autoGrid(plan);
+  const out = [];
+  EDIT.grid.forEach((row, p) => row.forEach((x, c) => {
+    const y = auto[p][c];
+    if (x.s !== y.s || x.t !== y.t || isFilled(x) !== isFilled(y)) {
+      out.push(`الصف ${CLASSES[c]}، الحصة ${PERIOD_NAMES[p]}: ${cellText(y)} ← ${cellText(x)}`);
+    }
+  }));
+  return out;
+}
+
+function editGrid(plan) {
+  if (!EDIT.grid) EDIT.grid = autoGrid(plan).map(r => r.map(x => ({ ...x })));
+  return EDIT.grid;
+}
+
+function swapCells(plan, k1, k2) {
+  if (k1 === k2) return;
+  const g = editGrid(plan);
+  const [p1, c1] = k1.split('-').map(Number);
+  const [p2, c2] = k2.split('-').map(Number);
+  const a = g[p1][c1], b = g[p2][c2];
+  // الخانة التي تفرغ: «انصراف» إن كانت ضمن يوم الصف الأصلي، وإلا «لا دوام»
+  const blank = (p, c) => ({ kind: isOutDay(plan, p, c) ? 'out' : 'none', manual: true });
+  g[p1][c1] = isFilled(b) ? { ...b, manual: true } : blank(p1, c1);
+  g[p2][c2] = isFilled(a) ? { ...a, manual: true } : blank(p2, c2);
+}
+
+/** هل الحصة ضمن يوم الصف الأصلي (فتصير «انصراف» إذا فرغت)؟ */
+function isOutDay(plan, p, c) {
+  return TIMETABLE[DAYS[STATE.d]][p] && !!TIMETABLE[DAYS[STATE.d]][p][c];
+}
+
+function bindEditor() {
+  const plan = CURRENT_PLAN;
+  const tog = $('#edit-toggle');
+  if (!tog) return;
+  tog.addEventListener('click', () => { EDIT.on = !EDIT.on; EDIT.sel = null; render(); });
+  const rs = $('#edit-reset');
+  if (rs) rs.addEventListener('click', () => { EDIT.grid = null; EDIT.sel = null; render(); });
+  if (!EDIT.on) return;
+
+  document.querySelectorAll('td[data-cell]').forEach(td => {
+    td.addEventListener('click', () => {
+      const k = td.dataset.cell;
+      if (!EDIT.sel) EDIT.sel = k;
+      else if (EDIT.sel === k) EDIT.sel = null;
+      else { swapCells(plan, EDIT.sel, k); EDIT.sel = null; }
+      render();
+    });
+    td.addEventListener('dragstart', e => { e.dataTransfer.setData('text/plain', td.dataset.cell); td.classList.add('dragging'); });
+    td.addEventListener('dragend', () => td.classList.remove('dragging'));
+    td.addEventListener('dragover', e => { e.preventDefault(); td.classList.add('drop-over'); });
+    td.addEventListener('dragleave', () => td.classList.remove('drop-over'));
+    td.addEventListener('drop', e => {
+      e.preventDefault();
+      const from = e.dataTransfer.getData('text/plain');
+      if (from) { swapCells(plan, from, td.dataset.cell); EDIT.sel = null; render(); }
+    });
+  });
+
+  const ap = $('#ed-apply');
+  if (ap) {
+    const [p, c] = EDIT.sel.split('-').map(Number);
+    ap.addEventListener('click', () => {
+      const g = editGrid(plan);
+      g[p][c] = { s: $('#ed-subject').value, t: $('#ed-teacher').value, kind: 'normal', manual: true };
+      EDIT.sel = null; render();
+    });
+    $('#ed-clear').addEventListener('click', () => {
+      const g = editGrid(plan);
+      g[p][c] = { kind: isOutDay(plan, p, c) ? 'out' : 'none', manual: true };
+      EDIT.sel = null; render();
+    });
+    $('#ed-cancel').addEventListener('click', () => { EDIT.sel = null; render(); });
+  }
 }
 
 /* ---------- نص جاهز للنسخ ---------- */
@@ -482,6 +685,13 @@ function planText(plan) {
     k.dropped.forEach(l => lines.push(`• يُستغنى عن حصة ${l.subject} (أ. ${l.teacher}) في الحصة ${PERIOD_NAMES[l.p]} حتى لا يبقى الصف وحده`));
     if (!k.moves.length && !k.kept.length && !k.dropped.length) lines.push('• لا نقل، الشاغر في آخر اليوم');
   });
+  const manual = manualChanges(plan);
+  if (manual.length) {
+    lines.push('', 'تعديلات يدوية:');
+    manual.forEach(m => lines.push('• ' + m));
+    const issues = gridIssues(EDIT.grid);
+    if (issues.msgs.length) { lines.push('', 'تنبيه — تضارب:'); issues.msgs.forEach(m => lines.push('• ' + m)); }
+  }
   return lines.join('\n');
 }
 
@@ -497,8 +707,17 @@ function render() {
   $('#opt-drop').checked = STATE.dropOk;
   $('#opt-max').value = STATE.maxCover;
 
+  const sig = planSignature();
+  if (sig !== EDIT.sig) { EDIT.sig = sig; EDIT.grid = null; EDIT.sel = null; }
+  const wrap = $('#day-wrap');
+  const scroll = wrap ? wrap.scrollLeft : null;
+
   CURRENT_PLAN = buildPlan();
   $('#plan').innerHTML = renderPlan(CURRENT_PLAN);
+
+  const wrap2 = $('#day-wrap');
+  if (wrap2 && scroll !== null) wrap2.scrollLeft = scroll;
+  bindEditor();
 
   $('#day-picker').querySelectorAll('[data-day]').forEach(b => {
     b.addEventListener('click', () => {

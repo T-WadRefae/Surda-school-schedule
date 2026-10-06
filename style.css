@@ -324,3 +324,29 @@ table.grid td.out .cell-teacher { color: #8a8a8a; font-weight: 800; }
 
 /* ===== جدول الإشغال (أول، ثانٍ، ثالث) ===== */
 .tag.rota { background: #fff6e6; border-color: #f0d6a8; color: #8a5a12; }
+
+/* ===== تحرير الجدول بعد التعديل ===== */
+.edit-bar { display: inline-flex; gap: 8px; flex-wrap: wrap; margin-inline-start: auto; }
+.edit-bar .btn { padding: 6px 14px; font-size: .82rem; }
+table.grid.editing td[data-cell] { cursor: pointer; user-select: none; }
+table.grid.editing td[data-cell]:hover { filter: brightness(.97); }
+table.grid tbody tr td.manual { box-shadow: inset 0 0 0 2px #7c5cc4; }
+table.grid tbody tr td.sel { box-shadow: inset 0 0 0 3px var(--brand); background: #e9f2fb !important; }
+table.grid tbody tr td.clash { box-shadow: inset 0 0 0 3px #d64545; }
+table.grid tbody tr td.drop-over { background: #fff4d6 !important; }
+table.grid tbody tr td.dragging { opacity: .45; }
+.editor {
+  display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end;
+  border: 1.5px solid var(--line); border-radius: 12px; padding: 10px 12px; margin-bottom: 10px;
+  background: var(--surface); font-size: .86rem;
+}
+.editor label { display: grid; gap: 4px; font-weight: 700; color: var(--muted); }
+.editor select { font-family: inherit; font-size: .9rem; padding: 6px 8px; border-radius: 8px; border: 1.5px solid var(--line); min-width: 150px; }
+.editor-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.editor-actions .btn { padding: 6px 14px; font-size: .82rem; }
+.clash-list {
+  background: #fdeeee; border: 1px solid #f4cccc; color: #a13030; border-radius: 10px;
+  padding: 8px 12px; font-size: .84rem; font-weight: 700; line-height: 1.8; margin-bottom: 10px;
+}
+.edit-hint { margin: 0 0 10px; }
+@media print { .edit-bar, .editor, .edit-hint { display: none !important; } }
