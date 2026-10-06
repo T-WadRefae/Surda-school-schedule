@@ -570,13 +570,14 @@ function renderDayCard(plan) {
   const body = grid.map((row, p) =>
     `<tr><th>${periodLabel(p)}</th>${row.map((x, c) => gridCellHTML(x, p, c, issues)).join('')}</tr>`).join('');
   const changed = EDIT.grid ? manualChanges(plan).length : 0;
-  return `<div class="card">
+  return `<div class="card" id="day-card">
       <div class="card-title">📆 جدول ${esc(DAYS[d])} بعد التعديل
         <span class="edit-bar no-print">
           <button class="btn ${EDIT.on ? '' : 'btn-ghost'}" id="edit-toggle">${EDIT.on ? '✔ إنهاء التحرير' : '✏️ تحرير'}</button>
           ${changed ? `<button class="btn btn-ghost" id="edit-reset">↺ إلغاء التعديلات اليدوية (${changed})</button>` : ''}
         </span>
       </div>
+      <p class="print-only day-absent">الغائبات: ${[...STATE.absent].map(t => 'أ. ' + esc(t)).join('، ')}</p>
       ${editorHTML(grid)}
       ${issues.msgs.length ? `<div class="clash-list">⚠️ ${issues.msgs.map(esc).join('<br>⚠️ ')}</div>` : ''}
       <div class="table-wrap" id="day-wrap">
@@ -585,6 +586,7 @@ function renderDayCard(plan) {
       <p class="scroll-hint">مرّري الجدول أفقيًا 👈 لرؤية بقية الصفوف</p>
       <p class="hint">⏫ حصة مُقدَّمة · 🟩 إشغال · «انصراف» الحصص التي يُعفى منها الصف
         ${EDIT.grid ? ' · الإطار البنفسجي: تعديل يدوي' : ''} · الإطار الأحمر: تضارب.</p>
+      <div class="day-print no-print"><button class="btn" id="day-print-btn">🖨️ طباعة الجدول</button></div>
     </div>`;
 }
 
@@ -624,8 +626,25 @@ function isOutDay(plan, p, c) {
   return TIMETABLE[DAYS[STATE.d]][p] && !!TIMETABLE[DAYS[STATE.d]][p][c];
 }
 
+/** يطبع جدول اليوم بعد التعديل وحده، بلا ملخصات، على ورقة أفقية */
+function printDayTable() {
+  const st = document.createElement('style');
+  st.textContent = '@page { size: A4 landscape; margin: 8mm; }';
+  document.head.appendChild(st);
+  document.body.classList.add('print-day');
+  const done = () => {
+    document.body.classList.remove('print-day');
+    st.remove();
+    window.removeEventListener('afterprint', done);
+  };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+
 function bindEditor() {
   const plan = CURRENT_PLAN;
+  const pb = $('#day-print-btn');
+  if (pb) pb.addEventListener('click', printDayTable);
   const tog = $('#edit-toggle');
   if (!tog) return;
   tog.addEventListener('click', () => { EDIT.on = !EDIT.on; EDIT.sel = null; render(); });

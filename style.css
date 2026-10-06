@@ -350,3 +350,21 @@ table.grid tbody tr td.dragging { opacity: .45; }
 }
 .edit-hint { margin: 0 0 10px; }
 @media print { .edit-bar, .editor, .edit-hint { display: none !important; } }
+
+/* ===== طباعة جدول اليوم بعد التعديل وحده ===== */
+.print-only { display: none; }
+.day-print { display: flex; justify-content: flex-end; margin-top: 12px; }
+@media print {
+  body.print-day .site-header, body.print-day .site-footer, body.print-day main > section,
+  body.print-day #plan > *:not(#day-card),
+  body.print-day #day-card .hint, body.print-day #day-card .scroll-hint,
+  body.print-day #day-card .clash-list, body.print-day .day-print { display: none !important; }
+  body.print-day .print-only { display: block; font-size: 10pt; margin: 0 0 3mm; color: #333; }
+  body.print-day #day-card { border: 0; padding: 0; margin: 0; box-shadow: none; }
+  body.print-day #day-card .card-title { margin-bottom: 2mm; font-size: 14pt; }
+  body.print-day #day-card table.grid { min-width: 0 !important; width: 100%; font-size: 12pt; }
+  body.print-day #day-card table.grid th, body.print-day #day-card table.grid td { padding: 2.6mm 1mm; }
+  body.print-day #day-card .cell-subject { font-size: 12pt; }
+  body.print-day #day-card .cell-teacher { font-size: 10pt; }
+  body.print-day #day-card table.grid td.sel { box-shadow: none; background: none !important; }
+}
