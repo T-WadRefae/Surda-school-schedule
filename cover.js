@@ -586,7 +586,10 @@ function renderDayCard(plan) {
       <p class="scroll-hint">مرّري الجدول أفقيًا 👈 لرؤية بقية الصفوف</p>
       <p class="hint">⏫ حصة مُقدَّمة · 🟩 إشغال · «انصراف» الحصص التي يُعفى منها الصف
         ${EDIT.grid ? ' · الإطار البنفسجي: تعديل يدوي' : ''} · الإطار الأحمر: تضارب.</p>
-      <div class="day-print no-print"><button class="btn" id="day-print-btn">🖨️ طباعة الجدول</button></div>
+      <div class="day-print no-print">
+        <button class="btn btn-ghost" id="day-image-btn">🖼️ حفظ كصورة</button>
+        <button class="btn" id="day-print-btn">🖨️ طباعة الجدول</button>
+      </div>
     </div>`;
 }
 
@@ -641,10 +644,102 @@ function printDayTable() {
   window.print();
 }
 
+/** يرسم جدول اليوم بعد التعديل في صورة PNG، ثم يحفظها أو يفتح المشاركة على الجوال */
+async function saveDayImage(btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳ جارٍ التجهيز…';
+  try {
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const grid = EDIT.grid || autoGrid(CURRENT_PLAN);
+    const day = DAYS[STATE.d];
+    const FONT = '"Cairo", "Noto Naskh Arabic", "Segoe UI", Tahoma, sans-serif';
+    const S = 2;                                   // دقة مضاعفة لصورة واضحة
+    const M = 28, PER = 104, COL = 150, HEAD = 46, ROW = 66, TOP = 96;
+    const W = M * 2 + PER + COL * CLASSES.length;
+    const H = TOP + HEAD + ROW * grid.length + M;
+    const cv = document.createElement('canvas');
+    cv.width = W * S; cv.height = H * S;
+    const g = cv.getContext('2d');
+    g.scale(S, S);
+    g.direction = 'rtl'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+
+    // العنوان والغائبات (من اليمين)
+    g.textAlign = 'right'; g.fillStyle = '#1f3b52';
+    g.font = `800 26px ${FONT}`;
+    g.fillText(`جدول ${day} بعد التعديل`, W - M, 38);
+    g.fillStyle = '#555'; g.font = `600 15px ${FONT}`;
+    g.fillText(`الغائبات: ${[...STATE.absent].map(t => 'أ. ' + t).join('، ')}`, W - M, 72);
+    g.textAlign = 'center';
+
+    const FILL = { normal: '#ffffff', moved: '#e8f1fd', cover: '#eaf7ef', gap: '#fdecec', out: '#f1f1f1', none: '#f7f9fb' };
+    const xOf = i => W - M - PER - COL * (i + 1);          // عمود الصف i (من اليمين)
+    const box = (x, y, w, h, fill) => {
+      g.fillStyle = fill; g.fillRect(x, y, w, h);
+      g.strokeStyle = '#c9d6e2'; g.lineWidth = 1; g.strokeRect(x + .5, y + .5, w, h);
+    };
+
+    // الرأس
+    box(W - M - PER, TOP, PER, HEAD, '#e9f0f6');
+    g.fillStyle = '#1f3b52'; g.font = `800 16px ${FONT}`;
+    g.fillText('الحصة', W - M - PER / 2, TOP + HEAD / 2);
+    CLASSES.forEach((c, i) => {
+      box(xOf(i), TOP, COL, HEAD, '#e9f0f6');
+      g.fillStyle = '#1f3b52'; g.fillText(c, xOf(i) + COL / 2, TOP + HEAD / 2);
+    });
+
+    // الجسم
+    grid.forEach((row, p) => {
+      const y = TOP + HEAD + ROW * p;
+      box(W - M - PER, y, PER, ROW, '#f4f8fb');
+      g.fillStyle = '#1f3b52'; g.font = `800 15px ${FONT}`;
+      g.fillText(PERIOD_NAMES[p], W - M - PER / 2, y + ROW / 2);
+      row.forEach((x, i) => {
+        const cx = xOf(i) + COL / 2;
+        box(xOf(i), y, COL, ROW, FILL[x.kind] || '#fff');
+        if (!isFilled(x)) {
+          if (x.kind === 'out') { g.fillStyle = '#8a8a8a'; g.font = `700 13px ${FONT}`; g.fillText('انصراف', cx, y + ROW / 2); }
+          return;
+        }
+        g.fillStyle = x.kind === 'gap' ? '#a13030' : subjectColor(x.s);
+        g.font = `800 17px ${FONT}`;
+        g.fillText(x.s, cx, y + ROW / 2 - 11, COL - 10);
+        let sub = x.t ? `أ. ${x.t}` : 'بلا تغطية';
+        if (x.kind === 'moved') sub += ` ⏫ من ${PERIOD_NAMES[x.from]}`;
+        if (x.kind === 'cover') sub += ` (بدل أ. ${x.orig})`;
+        g.fillStyle = x.kind === 'gap' ? '#a13030' : x.kind === 'moved' ? '#1d4f91' : x.kind === 'cover' ? '#1c6b3c' : '#5b6b78';
+        g.font = `700 12.5px ${FONT}`;
+        g.fillText(sub, cx, y + ROW / 2 + 14, COL - 8);
+      });
+    });
+
+    const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+    // اسم ملف لاتيني: بعض المتصفحات تُسقط الأسماء العربية عند التنزيل
+    const EN = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday'];
+    const name = `schedule-${EN[STATE.d] || 'day'}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    const touch = window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+    if (touch && navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: name });
+    } else {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    }
+  } catch (e) {
+    if (!(e && e.name === 'AbortError')) alert('تعذّر حفظ الصورة: ' + (e && e.message ? e.message : e));
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
 function bindEditor() {
   const plan = CURRENT_PLAN;
   const pb = $('#day-print-btn');
   if (pb) pb.addEventListener('click', printDayTable);
+  const ib = $('#day-image-btn');
+  if (ib) ib.addEventListener('click', () => saveDayImage(ib));
   const tog = $('#edit-toggle');
   if (!tog) return;
   tog.addEventListener('click', () => { EDIT.on = !EDIT.on; EDIT.sel = null; render(); });

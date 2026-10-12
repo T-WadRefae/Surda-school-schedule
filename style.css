@@ -353,7 +353,7 @@ table.grid tbody tr td.dragging { opacity: .45; }
 
 /* ===== طباعة جدول اليوم بعد التعديل وحده ===== */
 .print-only { display: none; }
-.day-print { display: flex; justify-content: flex-end; margin-top: 12px; }
+.day-print { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
 @media print {
   body.print-day .site-header, body.print-day .site-footer, body.print-day main > section,
   body.print-day #plan > *:not(#day-card),
