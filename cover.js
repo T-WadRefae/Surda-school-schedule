@@ -436,6 +436,14 @@ function renderPlan(plan) {
    ========================================================== */
 const EDIT = { on: false, grid: null, sel: null, sig: '' };
 
+/* خيارات إضافية في لوحة التحرير (لا تدخل الجدول الأساسي) */
+const EXTRA_TEACHERS = ['المرشدة'];
+const EXTRA_SUBJECTS = ['إرشاد', 'إشغال'];
+Object.assign(SUBJECT_COLORS, { 'إرشاد': '#0e7490', 'إشغال': '#8a5a12' }, SUBJECT_COLORS);
+
+/** اسم المعلمة للعرض: «أ. فلانة»، أما «المرشدة» فتُكتب كما هي */
+const tName = t => (EXTRA_TEACHERS.includes(t) ? t : 'أ. ' + t);
+
 const planSignature = () => [STATE.d, [...STATE.absent].sort().join(','), STATE.compact,
   STATE.dropOk, STATE.maxCover, JSON.stringify(STATE.overrides)].join('|');
 
@@ -484,7 +492,7 @@ function gridIssues(grid) {
         msgs.push(`الحصة ${PERIOD_NAMES[p]}: أ. ${t} غائبة اليوم (الصف ${cs.map(c => CLASSES[c]).join('، ')})`);
       } else if (cs.length > 1) {
         cs.forEach(c => bad.add(`${p}-${c}`));
-        msgs.push(`الحصة ${PERIOD_NAMES[p]}: أ. ${t} في ${cs.map(c => 'الصف ' + CLASSES[c]).join(' و')} في الوقت نفسه`);
+        msgs.push(`الحصة ${PERIOD_NAMES[p]}: ${tName(t)} في ${cs.map(c => 'الصف ' + CLASSES[c]).join(' و')} في الوقت نفسه`);
       }
     });
   });
@@ -502,7 +510,7 @@ function gridIssues(grid) {
 }
 
 const cellText = x => !isFilled(x) ? (x.kind === 'out' ? 'انصراف' : 'لا دوام')
-  : x.kind === 'gap' ? `${x.s} — بلا تغطية` : `${x.s} — أ. ${x.t}`;
+  : x.kind === 'gap' ? `${x.s} — بلا تغطية` : `${x.s} — ${tName(x.t)}`;
 
 function gridCellHTML(x, p, c, issues) {
   const key = `${p}-${c}`;
@@ -516,14 +524,14 @@ function gridCellHTML(x, p, c, issues) {
   } else if (x.kind === 'cover') {
     cls.push('swapped');
     inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
-      <span class="cell-teacher"><s>${esc(x.orig)}</s> ← <b>أ. ${esc(x.t)}</b></span>`;
+      <span class="cell-teacher"><s>${esc(x.orig)}</s> ← <b>${esc(tName(x.t))}</b></span>`;
   } else if (x.kind === 'moved') {
     cls.push('moved');
     inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
-      <span class="cell-teacher"><b>أ. ${esc(x.t)}</b> ⏫ من ${esc(PERIOD_NAMES[x.from])}</span>`;
+      <span class="cell-teacher"><b>${esc(tName(x.t))}</b> ⏫ من ${esc(PERIOD_NAMES[x.from])}</span>`;
   } else {
     inner = `<span class="cell-subject" style="color:${subjectColor(x.s)}">${esc(x.s)}</span>
-      <span class="cell-teacher">أ. ${esc(x.t)}</span>`;
+      <span class="cell-teacher">${esc(tName(x.t))}</span>`;
   }
   if (x.manual) cls.push('manual');
   if (issues.bad.has(key)) cls.push('clash');
@@ -542,17 +550,18 @@ function editorHTML(grid) {
   }
   const [p, c] = EDIT.sel.split('-').map(Number);
   const x = grid[p][c];
-  const subjects = [...new Set(LESSONS.map(l => l.subject))].sort((a, b) => a.localeCompare(b, 'ar'));
+  const subjects = [...new Set(LESSONS.map(l => l.subject))].sort((a, b) => a.localeCompare(b, 'ar'))
+    .concat(EXTRA_SUBJECTS);
   const busyAt = {};
   grid[p].forEach((y, cc) => { if (y.t && cc !== c) busyAt[y.t] = CLASSES[cc]; });
-  const teachers = TEACHERS.filter(t => !STATE.absent.has(t));
+  const teachers = TEACHERS.filter(t => !STATE.absent.has(t)).concat(EXTRA_TEACHERS);
   return `<div class="editor">
     <b>الصف ${esc(CLASSES[c])} — الحصة ${esc(PERIOD_NAMES[p])}</b>
     <label>المادة
       <select id="ed-subject">${subjects.map(s => `<option ${x.s === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select>
     </label>
     <label>المعلمة
-      <select id="ed-teacher">${teachers.map(t => `<option value="${esc(t)}" ${x.t === t ? 'selected' : ''}>أ. ${esc(t)}${busyAt[t] ? ` (مشغولة: ${esc(busyAt[t])})` : ''}</option>`).join('')}</select>
+      <select id="ed-teacher">${teachers.map(t => `<option value="${esc(t)}" ${x.t === t ? 'selected' : ''}>${esc(tName(t))}${busyAt[t] ? ` (مشغولة: ${esc(busyAt[t])})` : ''}</option>`).join('')}</select>
     </label>
     <div class="editor-actions">
       <button class="btn" id="ed-apply">تطبيق</button>
@@ -704,7 +713,7 @@ async function saveDayImage(btn) {
         g.fillStyle = x.kind === 'gap' ? '#a13030' : subjectColor(x.s);
         g.font = `800 17px ${FONT}`;
         g.fillText(x.s, cx, y + ROW / 2 - 11, COL - 10);
-        let sub = x.t ? `أ. ${x.t}` : 'بلا تغطية';
+        let sub = x.t ? tName(x.t) : 'بلا تغطية';
         if (x.kind === 'moved') sub += ` ⏫ من ${PERIOD_NAMES[x.from]}`;
         if (x.kind === 'cover') sub += ` (بدل أ. ${x.orig})`;
         g.fillStyle = x.kind === 'gap' ? '#a13030' : x.kind === 'moved' ? '#1d4f91' : x.kind === 'cover' ? '#1c6b3c' : '#5b6b78';
