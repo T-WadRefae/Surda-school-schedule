@@ -437,12 +437,14 @@ function renderPlan(plan) {
 const EDIT = { on: false, grid: null, sel: null, sig: '' };
 
 /* خيارات إضافية في لوحة التحرير (لا تدخل الجدول الأساسي) */
-const EXTRA_TEACHERS = ['المرشدة'];
+const EXTRA_TEACHERS = ['المرشدة', 'ميسون', 'أمل (معلمة الظل)'];
+const NO_PREFIX = ['المرشدة'];   // تُكتب بلا «أ.»
 const EXTRA_SUBJECTS = ['إرشاد', 'إشغال'];
 Object.assign(SUBJECT_COLORS, { 'إرشاد': '#0e7490', 'إشغال': '#8a5a12' }, SUBJECT_COLORS);
 
-/** اسم المعلمة للعرض: «أ. فلانة»، أما «المرشدة» فتُكتب كما هي */
-const tName = t => (EXTRA_TEACHERS.includes(t) ? t : 'أ. ' + t);
+/** اسم المعلمة للعرض: «أ. فلانة»، أما «المرشدة» فتُكتب كما هي.
+    «أمل (معلمة الظل)» اسم مستقل عن أ. أمل، فلا تتداخلان في كشف التضارب. */
+const tName = t => (NO_PREFIX.includes(t) ? t : 'أ. ' + t);
 
 const planSignature = () => [STATE.d, [...STATE.absent].sort().join(','), STATE.compact,
   STATE.dropOk, STATE.maxCover, JSON.stringify(STATE.overrides)].join('|');
